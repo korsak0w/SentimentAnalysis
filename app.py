@@ -1,0 +1,183 @@
+######################
+# Import libraries
+######################
+import streamlit as st
+import tensorflow as tf
+import pandas as pd
+import functions as fnc
+import io
+
+######################
+# Page Title
+######################
+
+st.write("""
+# Sentiment Analysis with Keras
+This app allows users to **build** and **train** their own model for sentiment analysis using Keras. Users can **customize the network architecture**, **manage datasets**, and **train** and **evaluate** their model.
+***
+""")
+
+######################
+# Session States
+######################
+
+states = [
+    'file',
+    'df',
+    'column_X',
+    'column_y',
+    'train_set',
+    'test_set',
+    'table',
+    'test_train_split',
+    'batch_size',
+    'vocab_size',
+    'num_oov_buckets',
+    'progress_prep',
+    'encoded_train_set',
+]
+
+for state in states:
+    if state not in st.session_state:
+        st.session_state[state] = None
+
+######################
+# Upload Dataset
+######################
+
+st.header('Upload Your Dataset')
+st.session_state['file'] = st.file_uploader("Select a file from you hard drive")
+if st.session_state['file']:
+    st.session_state['df'] = pd.read_csv(st.session_state['file'])
+    buffer = io.StringIO()
+    st.session_state['df'].info(buf=buffer)
+    s = buffer.getvalue()
+    st.text(s)
+    st.warning("""
+    When preparing a dataset for binary sentiment analysis, please keep in mind that your dataset must contain a column with text and a column with labels that can be binary encoded (e.g. positive and negative). 
+    Additionally, your text and labels should not contain null-values. 
+    Please ensure that your dataset meets these requirements before using it to train a binary sentiment analysis model.
+    """)
+    st.write("""
+    ***
+    """)
+
+######################
+# Preprocessing
+######################
+
+if st.session_state['file']:
+    st.header('Preprocess Your Dataset')
+    st.write("""
+    The expected input format for the training data is a list of reviews, where each review is represented as an **array of integers**. 
+    """)
+    st.write("""
+    During preprocessing, all **punctuation** is removed, words are converted to **lowercase**, and **split by spaces**. The words are then **indexed by frequency**, with low integers representing frequent words. Additionally, there are three special tokens: **0** represents padding, **1** represents the start-of-sequence (SOS) token, and **2** represents unknown words.
+    """)
+    
+    col1, col2 = st.columns(2)
+    columns = list(st.session_state['df'].columns.values)
+    st.session_state['column_X'] = col1.multiselect('Select Input Column', columns)
+    st.session_state['column_y'] = col2.multiselect('Select Label Column', columns)
+    if len(st.session_state['column_X']) > 1 or len(st.session_state['column_y']) > 1:
+        st.warning('Please ensure that you select only one column for the input text and one column for the labels. Using multiple columns for either the input text or the labels may result in errors or unexpected behavior in your analysis or model.')
+    
+    col3, col4 = st.columns(2)
+    st.session_state['test_train_split'] = col3.slider('Test Train Split', 0.1, 0.9, step=0.1, value=(0.5))
+    st.session_state['batch_size'] = col4.select_slider('Batch Size', options=[16, 32, 64, 128, 256, 512, 1024, 2048], value=(32))
+
+    col5, col6 = st.columns(2)
+    st.session_state['vocab_size'] = col5.number_input('Vocabulary Size', step=1)
+    st.session_state['num_oov_buckets'] = col6.number_input('Number of OOV Buckets', step=1)
+    
+    if st.button('Start Preprocessing'):
+        df = st.session_state['df']
+        column_X = st.session_state['column_X'][0]
+        column_y = st.session_state['column_y'][0]
+        test_train_split = st.session_state['test_train_split']
+        batch_size = int(st.session_state['batch_size'])
+        vocab_size = int(st.session_state['vocab_size'])
+        num_oov_buckets = int(st.session_state['num_oov_buckets'])
+        # progress
+        prep_bar = st.progress(0)
+        # encode labels
+        df = fnc.encode_labels(df, column_y)
+        # split
+        train_len = round(len(df) * test_train_split)
+        st.session_state['train_set'] = df[:train_len]
+        st.session_state['test_set'] = df[train_len:]
+        # tensorflow
+        train_set = st.session_state['train_set']
+        train_set = fnc.create_tensorflow_dataset(train_set, column_X, column_y)
+        # vocabulary
+        prep_bar.progress(40)
+        vocabulary = fnc.create_vocabulary(train_set, batch_size, vocab_size)
+        prep_bar.progress(60)
+        st.session_state['table'] = fnc.create_lookup_table(vocabulary, num_oov_buckets)
+        # data transformation
+        prep_bar.progress(80)
+        table = st.session_state['table']
+        encoded_train_set = train_set.batch(batch_size).map(fnc.preprocess)
+        encoded_train_set = encoded_train_set.map(lambda x, y: fnc.encode_words(x, y, table)).prefetch(1)
+        st.session_state['encoded_train_set'] = encoded_train_set
+        prep_bar.progress(100)
+    if st.session_state['encoded_train_set']:
+        st.write(st.session_state['encoded_train_set'])
+    
+    st.write("""
+    ***
+    """)
+
+######################
+# Build Model
+######################
+
+if st.session_state['encoded_train_set']:
+    st.header('Build Your Model')
+    st.write("""
+    Write something here! 
+    """)
+
+    if "model_layers" not in st.session_state:
+        st.session_state["model_layers"] = []
+    if "hyper_params" not in st.session_state:
+        st.session_state["hyper_params"] = {}
+        st.write('testi mesti')
+
+    col1, col2 = st.columns([.05,1])
+    with col1:
+        if st.button('+'):
+            st.session_state.model_layers.append("Layer")
+
+    with col2:
+        if st.button('-') and len(st.session_state.model_layers) > 0:
+            st.session_state.model_layers.pop()
+            st.session_state["hyper_params"].popitem()
+    
+    layer_options = [
+        'Dense Layer',
+        'Embedding Layer',
+        'Simple Recurrent Neural Network Layer',
+        'Long Short-Term Memory Layer',
+        'Gated Recurrent Unit Layer'
+        ]
+    
+    input_dim = st.session_state['vocab_size'] + st.session_state['num_oov_buckets']
+    for i, layer in enumerate(st.session_state.model_layers):
+        st.write(f'#### Layer {i+1}')
+        st.session_state.model_layers[i] = st.selectbox(
+            'Select Layer',
+            layer_options,
+            key=f'select_layer_{i+1}'
+        )
+        hyper_params = fnc.create_hparams(st.session_state.model_layers[i], i+1, input_dim)
+        st.session_state["hyper_params"][i] = hyper_params
+    
+
+    st.write(st.session_state["hyper_params"])
+
+    st.write("""
+    ***
+    """)
+
+
