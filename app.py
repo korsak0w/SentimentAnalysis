@@ -7,6 +7,14 @@ import pandas as pd
 import functions as fnc
 import io
 
+from tensorflow import keras
+from keras.models import Sequential
+from keras.layers import Dense
+from keras.layers import Embedding
+from keras.layers import SimpleRNN
+from keras.layers import LSTM
+from keras.layers import GRU
+
 ######################
 # Page Title
 ######################
@@ -35,6 +43,9 @@ states = [
     'num_oov_buckets',
     'progress_prep',
     'encoded_train_set',
+    'model',
+    'model_built',
+    'model_compiled',
 ]
 
 for state in states:
@@ -140,19 +151,17 @@ if st.session_state['encoded_train_set']:
 
     if "model_layers" not in st.session_state:
         st.session_state["model_layers"] = []
-    if "hyper_params" not in st.session_state:
-        st.session_state["hyper_params"] = {}
-        st.write('testi mesti')
+    if "info_dict" not in st.session_state:
+        st.session_state["info_dict"] = {}
 
     col1, col2 = st.columns([.05,1])
     with col1:
         if st.button('+'):
             st.session_state.model_layers.append("Layer")
-
     with col2:
         if st.button('-') and len(st.session_state.model_layers) > 0:
             st.session_state.model_layers.pop()
-            st.session_state["hyper_params"].popitem()
+            st.session_state["info_dict"].popitem()
     
     layer_options = [
         'Dense Layer',
@@ -161,23 +170,110 @@ if st.session_state['encoded_train_set']:
         'Long Short-Term Memory Layer',
         'Gated Recurrent Unit Layer'
         ]
-    
     input_dim = st.session_state['vocab_size'] + st.session_state['num_oov_buckets']
-    for i, layer in enumerate(st.session_state.model_layers):
-        st.write(f'#### Layer {i+1}')
-        st.session_state.model_layers[i] = st.selectbox(
-            'Select Layer',
-            layer_options,
-            key=f'select_layer_{i+1}'
-        )
-        hyper_params = fnc.create_hparams(st.session_state.model_layers[i], i+1, input_dim)
-        st.session_state["hyper_params"][i] = hyper_params
     
-
-    st.write(st.session_state["hyper_params"])
+    for i, layer in enumerate(st.session_state.model_layers):
+        layer_number = i + 1
+        st.write(f'#### Layer {layer_number}')
+        st.session_state['model_layers'][i] = st.selectbox('Select Layer', layer_options, key=f'select_layer_{layer_number}')
+        infos = fnc.create_infos(st.session_state['model_layers'][i], layer_number, input_dim)
+        st.session_state["info_dict"][layer_number] = infos
+    
+    if len(st.session_state["info_dict"]) >= 1:
+        if st.button('Build Model'):
+            layer_dict = {'Dense': Dense, 'Embedding': Embedding, 'SimpleRNN': SimpleRNN, 'LSTM': LSTM, 'GRU': GRU}
+            st.session_state["model"] = Sequential()
+            for layer in st.session_state["info_dict"]:
+                layer_type = st.session_state["info_dict"][layer]['layer']
+                layer_class = layer_dict[layer_type]
+                hyper_params = {k: v for i, (k, v) in enumerate(st.session_state["info_dict"][layer].items()) if i != 0}
+                st.session_state["model"].add(layer_class(**hyper_params))
+                st.session_state["model"].build()
+            st.session_state['model_built'] = True
+    else:
+        st.warning('You must add at least one layer to the model before you can build it!')
+    
+    if st.session_state['model_built']:
+        st.text('Model built!')
 
     st.write("""
     ***
     """)
 
 
+######################
+# Compile Model
+######################
+
+if st.session_state['model_built']:
+    st.header('Compile Your Model')
+    st.write("""
+    Write something here! 
+    """)
+
+    optimizers = [
+        'sgd',
+        'rmsprop',
+        'adagrad',
+        'adadelta',
+        'adam',
+        'adamax',
+        'nadam',
+        'ftrl'
+    ]
+    loss_functions = [
+        'mean_squared_error',
+        'mean_absolute_error',
+        'mean_absolute_percentage_error',
+        'mean_squared_logarithmic_error',
+        'categorical_crossentropy',
+        'sparse_categorical_crossentropy',
+        'binary_crossentropy',
+        'hinge',
+        'squared_hinge',
+        'cosine_similarity',
+        'poisson',
+        'kullback_leibler_divergence',
+    ]
+    metrics = [
+        'accuracy',
+        'mse',
+        'mae',
+        'mape',
+        'precision',
+        'recall',
+        'AUC',
+        'f1_score',
+    ]
+
+    col1, col2 = st.columns(2)
+    optimizer = col1.selectbox('Optimizer', optimizers, index=4)
+    loss_function = col2.selectbox('Loss Function', loss_functions, index=6)
+    metrics = st.multiselect('Metrics', metrics)
+
+    if st.button('Compile Model'):
+        st.session_state["model"].compile(loss=loss_function, optimizer=optimizer, metrics=metrics)
+        st.session_state["model_compiled"] = True
+
+    if st.session_state["model_compiled"]:
+        with st.expander('Summary'):
+            st.session_state["model"].summary(line_length=79, print_fn=lambda x: st.text(x))
+
+    st.write("""
+    ***
+    """)
+
+
+######################
+# Train Model
+######################
+
+if st.session_state["model_compiled"]:
+    st.header('Train Your Model')
+    st.write("""
+    Write something here! 
+    """)
+
+    st.write("""
+    ***
+    """)
