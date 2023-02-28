@@ -346,3 +346,16 @@ def build_model(info_dict):
         model.add(layer_class(**hyper_params))
 
 
+######################
+# Inference
+######################
+
+def inf_preprocessing(text):
+    tf_text = tf.convert_to_tensor([text])
+    tf_text = tf.strings.substr(tf_text, 0, 300)
+    tf_text = tf.strings.regex_replace(tf_text, b"<br\\s*/?>", b" ")
+    tf_text = tf.strings.regex_replace(tf_text, b"[^a-zA-Z']", b" ")
+    tf_text = tf.strings.split(tf_text)
+    tf_text = tf_text.to_tensor(default_value=b"<pad>")
+    tf_text = st.session_state['table'].lookup(tf_text)
+    return tf_text

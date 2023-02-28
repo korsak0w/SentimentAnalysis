@@ -15,6 +15,8 @@ from keras.layers import SimpleRNN
 from keras.layers import LSTM
 from keras.layers import GRU
 
+import callbacks
+
 ######################
 # Page Title
 ######################
@@ -46,6 +48,10 @@ states = [
     'model',
     'model_built',
     'model_compiled',
+    'history',
+    'loss',
+    'accuracy',
+    'tf_text',
 ]
 
 for state in states:
@@ -119,7 +125,9 @@ if st.session_state['file']:
         st.session_state['test_set'] = df[train_len:]
         # tensorflow
         train_set = st.session_state['train_set']
+        test_set = st.session_state['test_set']
         train_set = fnc.create_tensorflow_dataset(train_set, column_X, column_y)
+        test_set = fnc.create_tensorflow_dataset(test_set, column_X, column_y)
         # vocabulary
         prep_bar.progress(40)
         vocabulary = fnc.create_vocabulary(train_set, batch_size, vocab_size)
@@ -128,12 +136,19 @@ if st.session_state['file']:
         # data transformation
         prep_bar.progress(80)
         table = st.session_state['table']
+        # encode train set
         encoded_train_set = train_set.batch(batch_size).map(fnc.preprocess)
         encoded_train_set = encoded_train_set.map(lambda x, y: fnc.encode_words(x, y, table)).prefetch(1)
         st.session_state['encoded_train_set'] = encoded_train_set
+        # encode test set
+        encoded_test_set = test_set.batch(batch_size).map(fnc.preprocess)
+        encoded_test_set = encoded_test_set.map(lambda x, y: fnc.encode_words(x, y, table)).prefetch(1)
+        st.session_state['encoded_test_set'] = encoded_test_set
+
         prep_bar.progress(100)
     if st.session_state['encoded_train_set']:
-        st.write(st.session_state['encoded_train_set'])
+        st.write('Train: ', st.session_state['encoded_train_set'])
+        st.write('Test: ', st.session_state['encoded_test_set'])
     
     st.write("""
     ***
@@ -274,6 +289,59 @@ if st.session_state["model_compiled"]:
     Write something here! 
     """)
 
+    train_set = st.session_state['encoded_train_set']
+    num_epochs = st.number_input('Epochs', step=1)
+    st.warning('Callbacks could be added in the future!')
+
+    if st.button('Train Model'):
+        st.session_state['history'] = st.session_state["model"].fit(train_set, epochs=num_epochs, callbacks=[callbacks.StreamlitCallback(num_epochs)])
+
     st.write("""
     ***
     """)
+
+
+######################
+# Evaluate Model
+######################
+
+if st.session_state['history']:
+    st.header('Evaluate Your Model')
+    st.write("""
+    Write something here! 
+    """)
+    
+    if st.session_state['loss'] == None and st.session_state['accuracy'] == None:
+        loss, accuracy = st.session_state["model"].evaluate(st.session_state['encoded_test_set'])
+        st.session_state['loss'] = loss
+        st.session_state['accuracy'] = accuracy
+    
+    loss_str = f"Loss: {st.session_state['loss']}"
+    accuracy_str = f"Accuracy: {st.session_state['accuracy']}"
+    st.text(loss_str)
+    st.text(accuracy_str)
+
+    st.write("""
+    ***
+    """)
+
+
+######################
+# Inference
+######################
+
+if st.session_state['history']:
+    st.header('Inference')
+    st.write("""
+    Write something here! 
+    """)
+
+    text = st.text_area('Write something and let your model predict the sentiment')
+    if text:
+        st.session_state['tf_text'] = fnc.inf_preprocessing(text)
+
+    if st.button('Predict Sentiment'):
+        result = st.session_state['model'].predict(st.session_state['tf_text'])
+        percentage = round(result[0][0] * 100)
+        result_str = f'The probability that your text is positive is {percentage}%.'
+        st.text(result_str)
