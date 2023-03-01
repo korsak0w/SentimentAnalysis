@@ -87,8 +87,7 @@ if st.session_state['file']:
     st.header('Preprocess Your Dataset')
     st.write("""
     The expected input format for the training data is a list of reviews, where each review is represented as an **array of integers**. 
-    """)
-    st.write("""
+    
     During preprocessing, all **punctuation** is removed, words are converted to **lowercase**, and **split by spaces**. The words are then **indexed by frequency**, with low integers representing frequent words. Additionally, there are three special tokens: **0** represents padding, **1** represents the start-of-sequence (SOS) token, and **2** represents unknown words.
     """)
     
@@ -161,7 +160,9 @@ if st.session_state['file']:
 if st.session_state['encoded_train_set']:
     st.header('Build Your Model')
     st.write("""
-    Write something here! 
+    You can add or remove layers by clicking on the (+) and (-) buttons, and each layer is displayed with a dropdown menu of **available layer types** (e.g., Dense, LSTM) and **input parameters** specific to that type.
+    
+    Once you have selected and configured your desired layers, you can click on the "Build Model" button to generate a **Sequential model** using the **Keras API**.
     """)
 
     if "model_layers" not in st.session_state:
@@ -209,8 +210,7 @@ if st.session_state['encoded_train_set']:
         st.warning('You must add at least one layer to the model before you can build it!')
     
     if st.session_state['model_built']:
-        st.text('Model built!')
-
+        st.success('The model was built successfully!')
     st.write("""
     ***
     """)
@@ -223,7 +223,9 @@ if st.session_state['encoded_train_set']:
 if st.session_state['model_built']:
     st.header('Compile Your Model')
     st.write("""
-    Write something here! 
+    The process of compiling the model involves specifying the **loss function**, **optimizer**, and **evaluation metrics** that will be utilized to train and evaluate the model throughout the training process.
+    
+    Different combinations of optimizers, loss functions, and metrics can have a significant impact on the performance of the model, so it's important to **choose these hyperparameters carefully** and optimize them for the specific task at hand.
     """)
 
     optimizers = [
@@ -273,6 +275,7 @@ if st.session_state['model_built']:
     if st.session_state["model_compiled"]:
         with st.expander('Summary'):
             st.session_state["model"].summary(line_length=79, print_fn=lambda x: st.text(x))
+        st.success('The model was compiled successfully!')
 
     st.write("""
     ***
@@ -286,15 +289,19 @@ if st.session_state['model_built']:
 if st.session_state["model_compiled"]:
     st.header('Train Your Model')
     st.write("""
-    Write something here! 
+    After compiling the model, you can **specifying the number of epochs** and then train your model on the labeled training dataset.
+
+    During each epoch, the model is fed the entire training dataset in small batches, and the weights and biases of the model are adjusted to **minimize the loss function**. Typically, **multiple epochs are needed** to achieve good performance on the training dataset, but too many epochs can lead to overfitting, where the model performs well on the training data but poorly on new, unseen data.
     """)
 
     train_set = st.session_state['encoded_train_set']
     num_epochs = st.number_input('Epochs', step=1)
-    st.warning('Callbacks could be added in the future!')
 
     if st.button('Train Model'):
         st.session_state['history'] = st.session_state["model"].fit(train_set, epochs=num_epochs, callbacks=[callbacks.StreamlitCallback(num_epochs)])
+
+    if st.session_state['history']:
+        st.success('The model was trained successfully!')
 
     st.write("""
     ***
@@ -333,15 +340,15 @@ if st.session_state['history']:
 if st.session_state['history']:
     st.header('Inference')
     st.write("""
-    Write something here! 
+    Machine learning inference is the stage in the development process where the knowledge acquired by the neural network during training is applied. The trained model is utilized to **make predictions** or inferences on **new** and **previously unseen data**. 
     """)
 
-    text = st.text_area('Write something and let your model predict the sentiment')
+    text = st.text_area('Write something and let your model predict the sentiment.')
     if text:
         st.session_state['tf_text'] = fnc.inf_preprocessing(text)
 
     if st.button('Predict Sentiment'):
         result = st.session_state['model'].predict(st.session_state['tf_text'])
         percentage = round(result[0][0] * 100)
-        result_str = f'The probability that your text is positive is {percentage}%.'
-        st.text(result_str)
+        result_str = f'Your text has a {percentage}% probability of being positive.'
+        st.info(result_str)
