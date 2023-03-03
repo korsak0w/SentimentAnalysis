@@ -1,5 +1,9 @@
 import tensorflow as tf
 import streamlit as st
+import matplotlib.pyplot as plt
+import numpy as np
+import pandas as pd
+from sklearn import metrics
 from tensorflow import keras
 from keras.models import Sequential
 from keras.layers import Dense
@@ -55,6 +59,24 @@ def create_tensorflow_dataset(dataset, column_X, column_y):
     tf_dataset = tf.data.Dataset.from_tensor_slices((X_col, y_col))
     tf_dataset = tf_dataset.map(lambda x, y: (x, tf.cast(y, tf.int64))).prefetch(1)
     return tf_dataset
+
+def split_dataset(df, test_train_split):
+    train_len = round(len(df) * test_train_split)
+    splitted = df[:train_len]
+    test_set = df[train_len:]
+    val_length = round(len(splitted) * 0.2)
+    train_set = splitted[val_length:]
+    val_set = splitted[:val_length]
+    return train_set, val_set, test_set
+
+def encode_datasets(datasets, batch_size, table):
+    encoded_datasets = []
+    for set in datasets:
+        prep_set = set.batch(batch_size).map(preprocess)
+        encoded_set = prep_set.map(lambda x, y: encode_words(x, y, table)).prefetch(1)
+        encoded_datasets.append(encoded_set)
+    train, val, test = encoded_datasets
+    return train, val, test
 
 
 ######################
@@ -344,6 +366,87 @@ def build_model(info_dict):
         layer_class = layer_dict[info_dict[layer]['layer']]
         hyper_params = {k: v for i, (k, v) in enumerate(info_dict[layer].items()) if i != 0}
         model.add(layer_class(**hyper_params))
+
+
+######################
+# Evaluate
+######################
+
+def acc_loss_over_time():
+    history_dict = st.session_state['history'].history
+
+    acc = history_dict['accuracy']
+    val_acc = history_dict['val_accuracy']
+    loss = history_dict['loss']
+    val_loss = history_dict['val_loss']
+
+    epochs = range(1, len(acc) + 1)
+    fig = plt.figure(figsize=(10, 6))
+    fig.tight_layout()
+
+    plt.subplot(2, 1, 1)
+    # r is for "solid red line"
+    plt.plot(epochs, loss, 'r', label='Training loss')
+    # b is for "solid blue line"
+    plt.plot(epochs, val_loss, 'b', label='Validation loss')
+    plt.title('Training and validation loss')
+    # plt.xlabel('Epochs')
+    plt.ylabel('Loss')
+    plt.legend()
+
+    plt.subplot(2, 1, 2)
+    plt.plot(epochs, acc, 'r', label='Training acc')
+    plt.plot(epochs, val_acc, 'b', label='Validation acc')
+    plt.title('Training and validation accuracy')
+    plt.xlabel('Epochs')
+    plt.ylabel('Accuracy')
+    plt.legend(loc='lower right')
+
+    return fig
+
+def get_metrics(true_labels, predicted_labels):
+    accuracy = np.round(metrics.accuracy_score(true_labels, predicted_labels), 4)
+    precision = np.round(metrics.precision_score(true_labels, predicted_labels, average='weighted'), 4)
+    recall = np.round(metrics.recall_score(true_labels, predicted_labels, average='weighted'), 4)
+    f1 = np.round(metrics.f1_score(true_labels, predicted_labels, average='weighted'), 4)
+    return accuracy, precision, recall, f1
+
+def display_confusion_matrix(true_labels, predicted_labels, classes=[1,0]):
+    total_classes = len(classes)
+    level_labels = [total_classes*[0], list(range(total_classes))]
+    cm = metrics.confusion_matrix(y_true=true_labels, y_pred=predicted_labels, labels=classes)
+    return cm
+
+def plot_confusion_matrix(conf_mx):
+    fig, ax = plt.subplots(figsize=(8, 8))
+    im = ax.matshow(conf_mx, cmap=plt.cm.Blues)
+    ax.set_xticks(np.arange(len(conf_mx)))
+    ax.set_yticks(np.arange(len(conf_mx)))
+    for i in range(len(conf_mx)):
+        for j in range(len(conf_mx)):
+            color = 'white' if conf_mx[i, j] > np.max(conf_mx) / 2 else 'black'
+            ax.text(j, i, str(conf_mx[i, j]), ha='center', va='center', color=color)
+    ax.set_xlabel('Predicted')
+    ax.set_ylabel('Actual')
+    plt.colorbar(im)
+    return fig
+
+
+def plot_roc_curve(fpr, tpr, roc_auc):
+    fig, ax = plt.subplots()
+    ax.plot(fpr, tpr, lw=2, label='ROC curve (area = %0.2f)' % roc_auc)
+    ax.plot([0, 1], [0, 1], linestyle='--', lw=2, color='gray', label='Random guess')
+    ax.set_xlim([-0.05, 1.05])
+    ax.set_ylim([-0.05, 1.05])
+    ax.set_xlabel('False Positive Rate')
+    ax.set_ylabel('True Positive Rate')
+    ax.legend(loc="lower right")
+    return fig
+
+@st.cache
+def convert_df(df):
+    # IMPORTANT: Cache the conversion to prevent computation on every rerun
+    return df.to_csv().encode('utf-8')
 
 
 ######################
