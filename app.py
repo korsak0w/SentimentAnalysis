@@ -4,8 +4,9 @@
 import streamlit as st
 import tensorflow as tf
 import pandas as pd
+import matplotlib.pyplot as plt
+from sklearn.metrics import roc_curve, auc
 import functions as fnc
-import io
 
 from tensorflow import keras
 from keras.models import Sequential
@@ -34,10 +35,10 @@ This app allows users to **build** and **train** their own model for sentiment a
 states = [
     'file',
     'df',
+    'use_default',
     'column_X',
     'column_y',
-    'train_set',
-    'test_set',
+    'test_labels',
     'table',
     'test_train_split',
     'batch_size',
@@ -45,6 +46,8 @@ states = [
     'num_oov_buckets',
     'progress_prep',
     'encoded_train_set',
+    'encoded_val_set',
+    'encoded_test_set',
     'model',
     'model_built',
     'model_compiled',
@@ -52,6 +55,10 @@ states = [
     'loss',
     'accuracy',
     'tf_text',
+    'fig_acc_loss',
+    'scores_df',
+    'fig_cm',
+    'fig_roc',
 ]
 
 for state in states:
@@ -63,13 +70,28 @@ for state in states:
 ######################
 
 st.header('Upload Your Dataset')
-st.session_state['file'] = st.file_uploader("Select a file from you hard drive")
-if st.session_state['file']:
-    st.session_state['df'] = pd.read_csv(st.session_state['file'])
-    buffer = io.StringIO()
-    st.session_state['df'].info(buf=buffer)
-    s = buffer.getvalue()
-    st.text(s)
+
+holder = st.empty()
+st.session_state['upload_file'] = holder.file_uploader("Select a file from you hard drive")
+
+if st.session_state['upload_file']:
+    use_default = st.checkbox('Use Default Dataset', disabled=True)
+else:
+    use_default = st.checkbox('Use Default Dataset', disabled=False)
+
+if use_default:
+    st.session_state['use_default'] = True
+    dataset_info = st.write('The **Large Movie Review Dataset** is a comprehensive collection of movie reviews that is commonly used as a **benchmark dataset** for binary sentiment classification tasks. It consists of 50,000 movie reviews, with 25,000 reviews for training and another 25,000 for testing. For more information, please read the paper ***Learning Word Vectors for Sentiment Analysis*** https://aclanthology.org/P11-1015/.')
+    holder.empty()
+    st.session_state['df'] = fnc.create_default_df()
+    st.text(fnc.create_pd_info(st.session_state['df']))
+else:
+    st.session_state['use_default'] = False
+    st.session_state['df'] = None
+
+if st.session_state['upload_file']:
+    st.session_state['df'] = pd.read_csv(st.session_state['upload_file'])
+    st.text(fnc.create_pd_info(st.session_state['df']))
     st.warning("""
     When preparing a dataset for binary sentiment analysis, please keep in mind that your dataset must contain a column with text and a column with labels that can be binary encoded (e.g. positive and negative). 
     Additionally, your text and labels should not contain null-values. 
@@ -79,11 +101,12 @@ if st.session_state['file']:
     ***
     """)
 
+
 ######################
 # Preprocessing
 ######################
 
-if st.session_state['file']:
+if st.session_state['df'] is not None:
     st.header('Preprocess Your Dataset')
     st.write("""
     The expected input format for the training data is a list of reviews, where each review is represented as an **array of integers**. 
@@ -93,8 +116,12 @@ if st.session_state['file']:
     
     col1, col2 = st.columns(2)
     columns = list(st.session_state['df'].columns.values)
-    st.session_state['column_X'] = col1.multiselect('Select Input Column', columns)
-    st.session_state['column_y'] = col2.multiselect('Select Label Column', columns)
+    if st.session_state['use_default']:
+        st.session_state['column_X'] = col1.multiselect('Select Input Column', columns, ('review'))
+        st.session_state['column_y'] = col2.multiselect('Select Label Column', columns, ('sentiment'))
+    else:
+        st.session_state['column_X'] = col1.multiselect('Select Input Column', columns)
+        st.session_state['column_y'] = col2.multiselect('Select Label Column', columns)
     if len(st.session_state['column_X']) > 1 or len(st.session_state['column_y']) > 1:
         st.warning('Please ensure that you select only one column for the input text and one column for the labels. Using multiple columns for either the input text or the labels may result in errors or unexpected behavior in your analysis or model.')
     
@@ -103,10 +130,11 @@ if st.session_state['file']:
     st.session_state['batch_size'] = col4.select_slider('Batch Size', options=[16, 32, 64, 128, 256, 512, 1024, 2048], value=(32))
 
     col5, col6 = st.columns(2)
-    st.session_state['vocab_size'] = col5.number_input('Vocabulary Size', step=1)
-    st.session_state['num_oov_buckets'] = col6.number_input('Number of OOV Buckets', step=1)
+    st.session_state['vocab_size'] = col5.number_input('Vocabulary Size', step=1, value=10000)
+    st.session_state['num_oov_buckets'] = col6.number_input('Number of OOV Buckets', step=1, value=1000)
     
     if st.button('Start Preprocessing'):
+        # sessions
         df = st.session_state['df']
         column_X = st.session_state['column_X'][0]
         column_y = st.session_state['column_y'][0]
@@ -114,41 +142,36 @@ if st.session_state['file']:
         batch_size = int(st.session_state['batch_size'])
         vocab_size = int(st.session_state['vocab_size'])
         num_oov_buckets = int(st.session_state['num_oov_buckets'])
-        # progress
+        
         prep_bar = st.progress(0)
-        # encode labels
         df = fnc.encode_labels(df, column_y)
-        # split
-        train_len = round(len(df) * test_train_split)
-        st.session_state['train_set'] = df[:train_len]
-        st.session_state['test_set'] = df[train_len:]
-        # tensorflow
-        train_set = st.session_state['train_set']
-        test_set = st.session_state['test_set']
-        train_set = fnc.create_tensorflow_dataset(train_set, column_X, column_y)
-        test_set = fnc.create_tensorflow_dataset(test_set, column_X, column_y)
-        # vocabulary
-        prep_bar.progress(40)
+        train, val, test = fnc.split_dataset(df, test_train_split)
+        test_labels = test.iloc[:, 1]
+        train_set = fnc.create_tensorflow_dataset(train, column_X, column_y)
+        val_set = fnc.create_tensorflow_dataset(val, column_X, column_y)
+        test_set = fnc.create_tensorflow_dataset(test, column_X, column_y)
+
+        # lookup table
+        prep_bar.progress(20)
         vocabulary = fnc.create_vocabulary(train_set, batch_size, vocab_size)
         prep_bar.progress(60)
         st.session_state['table'] = fnc.create_lookup_table(vocabulary, num_oov_buckets)
-        # data transformation
         prep_bar.progress(80)
         table = st.session_state['table']
-        # encode train set
-        encoded_train_set = train_set.batch(batch_size).map(fnc.preprocess)
-        encoded_train_set = encoded_train_set.map(lambda x, y: fnc.encode_words(x, y, table)).prefetch(1)
-        st.session_state['encoded_train_set'] = encoded_train_set
-        # encode test set
-        encoded_test_set = test_set.batch(batch_size).map(fnc.preprocess)
-        encoded_test_set = encoded_test_set.map(lambda x, y: fnc.encode_words(x, y, table)).prefetch(1)
-        st.session_state['encoded_test_set'] = encoded_test_set
 
+        # encode datasets
+        encoded_train_set, encoded_val_set, encoded_test_set = fnc.encode_datasets([train_set, val_set, test_set], batch_size, table)
         prep_bar.progress(100)
-    if st.session_state['encoded_train_set']:
-        st.write('Train: ', st.session_state['encoded_train_set'])
-        st.write('Test: ', st.session_state['encoded_test_set'])
     
+        st.session_state['test_labels'] = test_labels
+        st.session_state['encoded_train_set'] = encoded_train_set
+        st.session_state['encoded_val_set'] = encoded_val_set
+        st.session_state['encoded_test_set'] = encoded_test_set
+    #if st.session_state['encoded_train_set']:
+        st.write('Train Set: ', encoded_train_set)
+        st.write('Validation Set: ', encoded_val_set)
+        st.write('Test Set: ', encoded_test_set)
+        
     st.write("""
     ***
     """)
@@ -156,6 +179,9 @@ if st.session_state['file']:
 ######################
 # Build Model
 ######################
+
+# ! Add Bidirectional layer (for LSTM or GRU)
+# ! Add 1D Convolutional layers
 
 if st.session_state['encoded_train_set']:
     st.header('Build Your Model')
@@ -166,7 +192,7 @@ if st.session_state['encoded_train_set']:
     """)
 
     if "model_layers" not in st.session_state:
-        st.session_state["model_layers"] = []
+        st.session_state["model_layers"] = ["Default_Layer", "Default_Layer", "Default_Layer", "Default_Layer"]
     if "info_dict" not in st.session_state:
         st.session_state["info_dict"] = {}
 
@@ -190,10 +216,18 @@ if st.session_state['encoded_train_set']:
     
     for i, layer in enumerate(st.session_state.model_layers):
         layer_number = i + 1
-        st.write(f'#### Layer {layer_number}')
-        st.session_state['model_layers'][i] = st.selectbox('Select Layer', layer_options, key=f'select_layer_{layer_number}')
-        infos = fnc.create_infos(st.session_state['model_layers'][i], layer_number, input_dim)
-        st.session_state["info_dict"][layer_number] = infos
+        if st.session_state.model_layers[i] == 'Default_Layer':
+            # ! default layer adding
+            index_dict = {1: 1, 2: 4, 3: 4, 4: 0}
+            index = index_dict.get(layer_number, None)
+            model_layer = st.selectbox(f'Select Layer {layer_number}', layer_options, index=index, key=f'select_layer_{layer_number}')
+            infos = fnc.create_infos(model_layer, layer_number, input_dim, init=True)
+            st.session_state["info_dict"][layer_number] = infos
+        else:
+            # ! normal layer adding
+            model_layer = st.selectbox(f'Select Layer {layer_number}', layer_options, key=f'select_layer_{layer_number}')
+            infos = fnc.create_infos(model_layer, layer_number, input_dim, init=False)
+            st.session_state["info_dict"][layer_number] = infos
     
     if len(st.session_state["info_dict"]) >= 1:
         if st.button('Build Model'):
@@ -204,7 +238,6 @@ if st.session_state['encoded_train_set']:
                 layer_class = layer_dict[layer_type]
                 hyper_params = {k: v for i, (k, v) in enumerate(st.session_state["info_dict"][layer].items()) if i != 0}
                 st.session_state["model"].add(layer_class(**hyper_params))
-                st.session_state["model"].build()
             st.session_state['model_built'] = True
     else:
         st.warning('You must add at least one layer to the model before you can build it!')
@@ -252,24 +285,13 @@ if st.session_state['model_built']:
         'poisson',
         'kullback_leibler_divergence',
     ]
-    metrics = [
-        'accuracy',
-        'mse',
-        'mae',
-        'mape',
-        'precision',
-        'recall',
-        'AUC',
-        'f1_score',
-    ]
 
     col1, col2 = st.columns(2)
     optimizer = col1.selectbox('Optimizer', optimizers, index=4)
     loss_function = col2.selectbox('Loss Function', loss_functions, index=6)
-    metrics = st.multiselect('Metrics', metrics)
 
     if st.button('Compile Model'):
-        st.session_state["model"].compile(loss=loss_function, optimizer=optimizer, metrics=metrics)
+        st.session_state["model"].compile(loss=loss_function, optimizer=optimizer, metrics=['accuracy'])
         st.session_state["model_compiled"] = True
 
     if st.session_state["model_compiled"]:
@@ -298,7 +320,7 @@ if st.session_state["model_compiled"]:
     num_epochs = st.number_input('Epochs', step=1)
 
     if st.button('Train Model'):
-        st.session_state['history'] = st.session_state["model"].fit(train_set, epochs=num_epochs, callbacks=[callbacks.StreamlitCallback(num_epochs)])
+        st.session_state['history'] = st.session_state["model"].fit(train_set, epochs=num_epochs, validation_data=st.session_state['encoded_val_set'], callbacks=[callbacks.StreamlitCallback(num_epochs)])
 
     if st.session_state['history']:
         st.success('The model was trained successfully!')
@@ -315,19 +337,35 @@ if st.session_state["model_compiled"]:
 if st.session_state['history']:
     st.header('Evaluate Your Model')
     st.write("""
-    Write something here! 
+    When working with binary classifiers in Keras, it is important to **evaluate the performance** of the model using appropriate metrics. Some of the commonly used metrics for evaluating binary classifiers include **accuracy and loss over time**, **precision**, **recall**, **F1-score**, and **AUC-ROC**.
+    Evaluating the model using these metrics helps to identify areas where the model can be improved and to assess the overall performance of the classifier.
     """)
     
-    if st.session_state['loss'] == None and st.session_state['accuracy'] == None:
-        loss, accuracy = st.session_state["model"].evaluate(st.session_state['encoded_test_set'])
-        st.session_state['loss'] = loss
-        st.session_state['accuracy'] = accuracy
-    
-    loss_str = f"Loss: {st.session_state['loss']}"
-    accuracy_str = f"Accuracy: {st.session_state['accuracy']}"
-    st.text(loss_str)
-    st.text(accuracy_str)
+    if st.button('Evaluate Model'):
+        pred_test = (st.session_state["model"].predict(st.session_state['encoded_test_set']) > 0.5).astype("int32")
+        accuracy, precision, recall, f1 = fnc.get_metrics(st.session_state['test_labels'], pred_test.flatten())
+        st.session_state['fig_acc_loss'] = fnc.acc_loss_over_time()
+        scores = {'Accuracy': accuracy, 'Precision': precision, 'Recall': recall, 'F1 Score': f1}
+        st.session_state['scores_df'] = pd.DataFrame(scores, index=[0]).rename(index={0: 'Score'})
+        cm = fnc.display_confusion_matrix(st.session_state['test_labels'], pred_test.flatten())
+        st.session_state['fig_cm'] = fnc.plot_confusion_matrix(cm)
+        fpr, tpr, thresholds = roc_curve(st.session_state['test_labels'], pred_test.flatten())
+        roc_auc = auc(fpr, tpr)
+        st.session_state['fig_roc'] = fnc.plot_roc_curve(fpr, tpr, roc_auc)
+        
+    if st.session_state['fig_acc_loss']:
+        st.success('The model was evaluated successfully!')
+        st.write('**Model Performance Metrics on the Test Dataset**')
+        st.write(st.session_state['scores_df'])
+        with st.expander('Accuracy and Loss over time'):
+            st.pyplot(st.session_state['fig_acc_loss'])
 
+        with st.expander('Confusion Matrix'):
+            st.pyplot(st.session_state['fig_cm'])
+
+        with st.expander('Receiver Operating Characteristic (ROC)'):
+            st.pyplot(st.session_state['fig_roc'])
+    
     st.write("""
     ***
     """)
@@ -350,5 +388,5 @@ if st.session_state['history']:
     if st.button('Predict Sentiment'):
         result = st.session_state['model'].predict(st.session_state['tf_text'])
         percentage = round(result[0][0] * 100)
-        result_str = f'Your text has a {percentage}% probability of being positive.'
+        result_str = f'There is a {percentage}% chance that your text has a positive sentiment.'
         st.info(result_str)

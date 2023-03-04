@@ -12,12 +12,9 @@ class StreamlitCallback(tf.keras.callbacks.Callback):
     def on_train_begin(self, logs=None):
         self.start_time = time.time()
         st.text('Training in progress, please wait.')
-    
-    def on_train_end(self, logs=None):
-        st.text('Training completed.')
 
     def on_epoch_end(self, epoch, logs=None):
         progress_value = (epoch + 1) / self.epochs
         self.progress_bar.progress(int(progress_value * 100))
         time_taken = time.time() - self.start_time
-        st.text(f"Epoch {epoch+1}/{self.epochs} - loss: {logs['loss']:.4f} - time: {time_taken:.2f}s")
+        st.text(f"Epoch {epoch+1}/{self.epochs} - loss: {logs['loss']:.4f} - accuracy: {logs['accuracy']:.4f} - time: {time_taken:.2f}s")
