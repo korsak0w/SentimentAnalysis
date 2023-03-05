@@ -1,5 +1,13 @@
+######################
+# Import libraries
+######################
 import tensorflow as tf
 import streamlit as st
+import matplotlib.pyplot as plt
+import numpy as np
+import pandas as pd
+import io
+from sklearn import metrics
 from tensorflow import keras
 from keras.models import Sequential
 from keras.layers import Dense
@@ -8,6 +16,28 @@ from keras.layers import SimpleRNN
 from keras.layers import LSTM
 from keras.layers import GRU
 from collections import Counter
+
+
+
+######################
+# Upload Dataset
+######################
+
+def create_default_df():
+    df1 = pd.read_csv('data/IMDB_Dataset_Part1.csv')
+    df2 = pd.read_csv('data/IMDB_Dataset_Part2.csv')
+    df3 = pd.read_csv('data/IMDB_Dataset_Part2.csv')
+    df4 = pd.read_csv('data/IMDB_Dataset_Part4.csv')
+    frames = [df1, df2, df3, df4]
+    df = pd.concat(frames)
+    df = df.iloc[:, -2:]
+    return df
+
+def create_pd_info(df):
+    buffer = io.StringIO()
+    st.session_state['df'].info(buf=buffer)
+    s = buffer.getvalue()
+    return s
 
 
 ######################
@@ -56,6 +86,24 @@ def create_tensorflow_dataset(dataset, column_X, column_y):
     tf_dataset = tf_dataset.map(lambda x, y: (x, tf.cast(y, tf.int64))).prefetch(1)
     return tf_dataset
 
+def split_dataset(df, test_train_split):
+    train_len = round(len(df) * test_train_split)
+    splitted = df[:train_len]
+    test_set = df[train_len:]
+    val_length = round(len(splitted) * 0.2)
+    train_set = splitted[val_length:]
+    val_set = splitted[:val_length]
+    return train_set, val_set, test_set
+
+def encode_datasets(datasets, batch_size, table):
+    encoded_datasets = []
+    for set in datasets:
+        prep_set = set.batch(batch_size).map(preprocess)
+        encoded_set = prep_set.map(lambda x, y: encode_words(x, y, table)).prefetch(1)
+        encoded_datasets.append(encoded_set)
+    train, val, test = encoded_datasets
+    return train, val, test
+
 
 ######################
 # Build Model
@@ -65,13 +113,13 @@ activation_functions = [None, "relu", "sigmoid", "softmax", "softplus", "softsig
 weight_initializers = ['random_normal', 'random_uniform', 'truncated_normal', 'zeros', 'ones', 'glorot_normal', 'glorot_uniform', 'he_normal', 'he_uniform', 'identity', 'orthogonal']
 weight_regularizers = [None, 'l1', 'l2', 'l1_l2']
 
-def create_infos(layer_type, num_layer, input_dim):
+def create_infos(layer_type, num_layer, input_dim, init):
     with st.expander('Hyperparameters'):
         if layer_type == 'Dense Layer':
-            hyper_params = dense_params(num_layer)
+            hyper_params = dense_params(num_layer, init)
             return hyper_params
         elif layer_type == 'Embedding Layer':
-            hyper_params = embedding_params(num_layer, input_dim)
+            hyper_params = embedding_params(num_layer, input_dim, init)
             return hyper_params
         elif layer_type == 'Simple Recurrent Neural Network Layer':
             hyper_params = simple_rnn_params(num_layer)
@@ -80,14 +128,18 @@ def create_infos(layer_type, num_layer, input_dim):
             hyper_params = lstm_params(num_layer)
             return hyper_params
         else:
-            hyper_params = gru_params(num_layer)
+            hyper_params = gru_params(num_layer, init)
             return hyper_params
 
 
-def dense_params(num_layer):
+def dense_params(num_layer, init):
     col1, col2 = st.columns(2)
-    units =  col1.number_input('Number of Units', step=1, key=f'units_{num_layer}')
-    activation = col2.selectbox('Activation Function', activation_functions, key=f'activation_{num_layer}')
+    if init:
+        units =  col1.number_input('Number of Units', step=1, value=1, key=f'units_{num_layer}')
+        activation = col2.selectbox('Activation Function', activation_functions, index=2, key=f'activation_{num_layer}')
+    else:
+        units =  col1.number_input('Number of Units', step=1, key=f'units_{num_layer}')
+        activation = col2.selectbox('Activation Function', activation_functions, key=f'activation_{num_layer}')
 
     col3, col4 = st.columns(2)
     bias = col3.selectbox('Use Bias', (True, False), key=f'bias_{num_layer}')
@@ -119,9 +171,12 @@ def dense_params(num_layer):
         'bias_constraint': None,
     }
 
-def embedding_params(num_layer, input_dim):
+def embedding_params(num_layer, input_dim, init):
     col1, col2 = st.columns(2)
-    output_dim = col1.number_input('Embedding Dimensions', step=1, key=f'output_dim_{num_layer}')
+    if init:
+        output_dim = col1.number_input('Embedding Dimensions', step=1, value=128, key=f'output_dim_{num_layer}')
+    else:
+        output_dim = col1.number_input('Embedding Dimensions', step=1, key=f'output_dim_{num_layer}')
     mask_zero = col2.selectbox('Mask Zero', (False, True), key=f'mask_zero_{num_layer}')
 
     return {
@@ -266,9 +321,12 @@ def lstm_params(num_layer):
         'unroll': False,
     }
 
-def gru_params(num_layer):
+def gru_params(num_layer, init):
     col1, col2 = st.columns(2)
-    units =  col1.number_input('Number of Units', step=1, key=f'units_{num_layer}')
+    if init:
+        units =  col1.number_input('Number of Units', step=1, value=128, key=f'units_{num_layer}')
+    else:
+        units =  col1.number_input('Number of Units', step=1, key=f'units_{num_layer}')
     activation = col2.selectbox('Activation Function', activation_functions, index=6, key=f'activation_{num_layer}')
 
     col3, col4 = st.columns(2)
@@ -300,7 +358,10 @@ def gru_params(num_layer):
     recurrent_dropout = col14.slider('Recurrent Dropout', 0.0, 1.0, step=0.05, key=f'recurrent_dropout_{num_layer}')
 
     col15, col16 = st.columns(2)
-    return_sequences = col15.selectbox('Return Sequences', (False, True), key=f'return_sequences_{num_layer}')
+    if init and num_layer == 2:
+        return_sequences = col15.selectbox('Return Sequences', (True, False), key=f'return_sequences_{num_layer}')
+    else:
+        return_sequences = col15.selectbox('Return Sequences', (False, True), key=f'return_sequences_{num_layer}')
     return_state = col16.selectbox('Return State', (False, True), key=f'return_state_{num_layer}')
 
     col17, col18 = st.columns(2)
@@ -344,6 +405,87 @@ def build_model(info_dict):
         layer_class = layer_dict[info_dict[layer]['layer']]
         hyper_params = {k: v for i, (k, v) in enumerate(info_dict[layer].items()) if i != 0}
         model.add(layer_class(**hyper_params))
+
+
+######################
+# Evaluate
+######################
+
+def acc_loss_over_time():
+    history_dict = st.session_state['history'].history
+
+    acc = history_dict['accuracy']
+    val_acc = history_dict['val_accuracy']
+    loss = history_dict['loss']
+    val_loss = history_dict['val_loss']
+
+    epochs = range(1, len(acc) + 1)
+    fig = plt.figure(figsize=(10, 6))
+    fig.tight_layout()
+
+    plt.subplot(2, 1, 1)
+    # r is for "solid red line"
+    plt.plot(epochs, loss, 'r', label='Training loss')
+    # b is for "solid blue line"
+    plt.plot(epochs, val_loss, 'b', label='Validation loss')
+    plt.title('Training and validation loss')
+    # plt.xlabel('Epochs')
+    plt.ylabel('Loss')
+    plt.legend()
+
+    plt.subplot(2, 1, 2)
+    plt.plot(epochs, acc, 'r', label='Training acc')
+    plt.plot(epochs, val_acc, 'b', label='Validation acc')
+    plt.title('Training and validation accuracy')
+    plt.xlabel('Epochs')
+    plt.ylabel('Accuracy')
+    plt.legend(loc='lower right')
+
+    return fig
+
+def get_metrics(true_labels, predicted_labels):
+    accuracy = np.round(metrics.accuracy_score(true_labels, predicted_labels), 4)
+    precision = np.round(metrics.precision_score(true_labels, predicted_labels, average='weighted'), 4)
+    recall = np.round(metrics.recall_score(true_labels, predicted_labels, average='weighted'), 4)
+    f1 = np.round(metrics.f1_score(true_labels, predicted_labels, average='weighted'), 4)
+    return accuracy, precision, recall, f1
+
+def display_confusion_matrix(true_labels, predicted_labels, classes=[1,0]):
+    total_classes = len(classes)
+    level_labels = [total_classes*[0], list(range(total_classes))]
+    cm = metrics.confusion_matrix(y_true=true_labels, y_pred=predicted_labels, labels=classes)
+    return cm
+
+def plot_confusion_matrix(conf_mx):
+    fig, ax = plt.subplots(figsize=(8, 8))
+    im = ax.matshow(conf_mx, cmap=plt.cm.Blues)
+    ax.set_xticks(np.arange(len(conf_mx)))
+    ax.set_yticks(np.arange(len(conf_mx)))
+    for i in range(len(conf_mx)):
+        for j in range(len(conf_mx)):
+            color = 'white' if conf_mx[i, j] > np.max(conf_mx) / 2 else 'black'
+            ax.text(j, i, str(conf_mx[i, j]), ha='center', va='center', color=color)
+    ax.set_xlabel('Predicted')
+    ax.set_ylabel('Actual')
+    plt.colorbar(im)
+    return fig
+
+
+def plot_roc_curve(fpr, tpr, roc_auc):
+    fig, ax = plt.subplots()
+    ax.plot(fpr, tpr, lw=2, label='ROC curve (area = %0.2f)' % roc_auc)
+    ax.plot([0, 1], [0, 1], linestyle='--', lw=2, color='gray', label='Random guess')
+    ax.set_xlim([-0.05, 1.05])
+    ax.set_ylim([-0.05, 1.05])
+    ax.set_xlabel('False Positive Rate')
+    ax.set_ylabel('True Positive Rate')
+    ax.legend(loc="lower right")
+    return fig
+
+@st.cache
+def convert_df(df):
+    # IMPORTANT: Cache the conversion to prevent computation on every rerun
+    return df.to_csv().encode('utf-8')
 
 
 ######################
