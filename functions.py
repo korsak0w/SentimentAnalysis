@@ -7,14 +7,9 @@ import matplotlib.pyplot as plt
 import numpy as np
 import pandas as pd
 import io
+import options
 
 from sklearn import metrics
-from keras.models import Sequential
-from keras.layers import Dense
-from keras.layers import Embedding
-from keras.layers import SimpleRNN
-from keras.layers import LSTM
-from keras.layers import GRU
 from collections import Counter
 
 
@@ -103,6 +98,15 @@ def encode_datasets(datasets, batch_size, table):
     train, val, test = encoded_datasets
     return train, val, test
 
+def extract_raw_datasets(df, split, col_X, col_y, batch_size):
+    df = encode_labels(df, col_y)
+    raw_train_set, raw_val_set, raw_test_set = split_dataset(df, split)
+    raw_train_set = create_tensorflow_dataset(raw_train_set, col_X, col_y).batch(batch_size).prefetch(1)
+    raw_val_set = create_tensorflow_dataset(raw_val_set, col_X, col_y).batch(batch_size).prefetch(1)
+    raw_test_set = create_tensorflow_dataset(raw_test_set, col_X, col_y).batch(batch_size).prefetch(1)
+    return raw_train_set, raw_val_set, raw_test_set
+
+
 
 ######################
 # Build Model
@@ -126,8 +130,11 @@ def create_infos(layer_type, num_layer, input_dim, init):
         elif layer_type == 'Long Short-Term Memory Layer':
             hyper_params = lstm_params(num_layer)
             return hyper_params
-        else:
+        elif layer_type == 'Gated Recurrent Unit Layer':
             hyper_params = gru_params(num_layer, init)
+            return hyper_params
+        else:
+            hyper_params = pretrained_embedding_params(num_layer)
             return hyper_params
 
 
@@ -394,16 +401,15 @@ def gru_params(num_layer, init):
         'reset_after': reset_after,
     }
 
-
-layer_dict = {'Dense': Dense, 'Embedding': Embedding, 'SimpleRNN': SimpleRNN, 'LSTM': LSTM, 'GRU': GRU}
-
-def build_model(info_dict):
-    model = Sequential()
-    for layer in info_dict:
-        layer_type = info_dict[layer]['layer']
-        layer_class = layer_dict[info_dict[layer]['layer']]
-        hyper_params = {k: v for i, (k, v) in enumerate(info_dict[layer].items()) if i != 0}
-        model.add(layer_class(**hyper_params))
+def pretrained_embedding_params(num_layer):
+    handle = st.selectbox('Select Text Embedding', options.text_embeddings, key=f'url_{num_layer}')
+    return {
+        'layer': 'KerasLayer',
+        'handle': handle,
+        'dtype': tf.string,
+        'input_shape': [],
+        'output_shape': [50],
+    }
 
 
 ######################

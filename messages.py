@@ -43,7 +43,7 @@ SUCCESS_PREP = "The dataset was successfully preprocessed!"
 ######################
 
 BUILD_INFO = """
-    You can add or remove layers by clicking on the (+) and (-) buttons, and each layer is displayed with a dropdown menu of **available layer types** (e.g., Dense, LSTM) and **input parameters** specific to that type.
+    You can add or remove layers by clicking on the (**+**) and (**-**) buttons, and each layer is displayed with a dropdown menu of **available layer types** (e.g., Dense, LSTM) and **input parameters** specific to that type.
     
     Once you have selected and configured your desired layers, you can click on the "Build Model" button to generate a **Sequential model** using the **Keras API**.
     """
@@ -101,4 +101,3 @@ INFERENCE_INFO = """
 
 INFERENCE_TEXT = "Write something and let your model predict the sentiment."
 
-INFERENCE_RESULT = ""

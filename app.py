@@ -8,6 +8,7 @@ import messages
 import callbacks
 import options
 
+import tensorflow as tf
 from sklearn.metrics import roc_curve, auc
 from keras.models import Sequential
 from keras.layers import Dense
@@ -15,6 +16,8 @@ from keras.layers import Embedding
 from keras.layers import SimpleRNN
 from keras.layers import LSTM
 from keras.layers import GRU
+from tensorflow_hub import KerasLayer
+from keras.layers import Input
 
 
 ######################
@@ -44,6 +47,7 @@ states = [
     # Build Model
     'model',
     'model_built',
+    'use_raw_ds',
 
     # Compile
     'model_compiled',
@@ -51,20 +55,19 @@ states = [
     # Train
     'history',
 
-
-    
-    'batch_size',
-    
-    
-    
-    'loss',
-    'accuracy',
-    'tf_text',
-
+    # Evaluate
     'fig_acc_loss',
     'scores_df',
     'fig_cm',
     'fig_roc',
+
+    # Inference
+    'tf_text',
+
+    # Testing
+    'raw_train_set',
+    'raw_val_set',
+    'raw_test_set',
 ]
 
 for state in states:
@@ -141,6 +144,7 @@ if st.session_state.df is not None:
     # Preprocess the datasets
     if st.button('Start Preprocessing'):
         df = st.session_state['df']
+
         df = fnc.encode_labels(df, column_y)
         train_set, val_set, test_set = fnc.split_dataset(df, test_train_split)
         test_labels = test_set.iloc[:, 1]
@@ -158,6 +162,9 @@ if st.session_state.df is not None:
         datasets = [train_set, val_set, test_set]
         train_set, val_set, test_set = fnc.encode_datasets(datasets, batch_size, table)
         
+        # ! TEST
+        raw_train_set, raw_val_set, raw_test_set = fnc.extract_raw_datasets(df, test_train_split, column_X, column_y, batch_size)
+
         # Update sessions
         data_dict = {
         'train_set': train_set,
@@ -167,6 +174,10 @@ if st.session_state.df is not None:
         'num_oov_buckets': num_oov_buckets,
         'table': table,
         'test_labels': test_labels,
+
+        'raw_train_set': raw_train_set,
+        'raw_val_set': raw_val_set,
+        'raw_test_set': raw_test_set,
         }
         st.session_state.update(data_dict)
 
@@ -198,7 +209,8 @@ if st.session_state.train_set:
         'Embedding': Embedding,
         'SimpleRNN': SimpleRNN,
         'LSTM': LSTM,
-        'GRU': GRU
+        'GRU': GRU,
+        'KerasLayer': KerasLayer,
         }
     default_index_dict = {
         1: 1,
@@ -242,8 +254,14 @@ if st.session_state.train_set:
                 key=f'layer_{layer_number}'
                 )
             infos = fnc.create_infos(model_layer, layer_number, input_dim, init=False)
+        
+        # Flag to use raw dataset instead of preprocessed dataset
+        if infos['layer'] == 'KerasLayer':
+            st.session_state.use_raw_ds = True
+
+        # Update session
         st.session_state.info_dict[layer_number] = infos
-    
+
     # Build sequential model
     if len(st.session_state.info_dict):
         if st.button('Build Model'):
@@ -311,14 +329,21 @@ if st.session_state.model_compiled:
     st.header('Train Your Model')
     st.write(messages.TRAINING_INFO)
 
-    train_set = st.session_state.train_set
     num_epochs = st.number_input('Epochs', step=1)
+    
+    # ! testing
+    if st.session_state.use_raw_ds:
+        train_set = st.session_state.raw_train_set
+        val_set = st.session_state.raw_val_set
+    else:
+        train_set = st.session_state.train_set
+        val_set = st.session_state.val_set
 
     if st.button('Train Model'):
         st.session_state.history = st.session_state.model.fit(
             train_set,
             epochs=num_epochs,
-            validation_data=st.session_state.val_set,
+            #validation_data=val_set,
             callbacks=[callbacks.StreamlitCallback(num_epochs)]
             )
 
@@ -338,8 +363,12 @@ if st.session_state.history:
     
     if st.button('Evaluate Model'):
         model = st.session_state.model
-        test_set = st.session_state.test_set
         test_labels = st.session_state.test_labels
+
+        if st.session_state.use_raw_ds:
+            test_set = st.session_state.raw_test_set
+        else:
+            test_set = st.session_state.test_set
         
         # Predict y on test set and evaluate
         pred_test = (model.predict(test_set) > 0.5).astype("int32")
@@ -393,18 +422,22 @@ if st.session_state.history:
 # Inference
 ######################
 
-if st.session_state['history']:
+if st.session_state.history:
     st.header('Inference')
     st.write(messages.INFERENCE_INFO)
 
     text = st.text_area(messages.INFERENCE_TEXT)
     if text:
-        st.session_state['tf_text'] = fnc.inf_preprocessing(text)
+        st.session_state.tf_text = fnc.inf_preprocessing(text)
 
     if st.button('Predict Sentiment'):
-        result = st.session_state['model'].predict(st.session_state['tf_text'])
+        result = st.session_state.model.predict(st.session_state.tf_text)
         percentage = round(result[0][0] * 100)
         result_str = f"""
         There is a {percentage}% chance that your text has a positive sentiment.
         """
         st.info(result_str)
+
+
+    # ! Input needs to be a tf ds
+    # ! dtype int for normal, string for pretrained
