@@ -5,7 +5,8 @@ layer_options = [
         'Embedding Layer',
         'Simple Recurrent Neural Network Layer',
         'Long Short-Term Memory Layer',
-        'Gated Recurrent Unit Layer'
+        'Gated Recurrent Unit Layer',
+        'Pretrained Embedding Layer',
         ]
 
 optimizers = [
@@ -34,3 +35,10 @@ loss_functions = [
         'kullback_leibler_divergence',
     ]
 
+text_embeddings = [
+    'https://tfhub.dev/google/nnlm-en-dim50/2',
+    'https://tfhub.dev/google/nnlm-en-dim50-with-normalization/2',
+    'https://tfhub.dev/google/nnlm-en-dim128/2',
+    'https://tfhub.dev/google/nnlm-de-dim50/2',
+    'https://tfhub.dev/google/nnlm-de-dim128/2',
+]
