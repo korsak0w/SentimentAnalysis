@@ -199,6 +199,8 @@ def embedding_params(num_layer, input_dim, init):
     }
 
 def simple_rnn_params(num_layer):
+    bidirectional = st.checkbox('Add Bidirectional Wrapper', key=f'bidirectional_{num_layer}')
+    
     col1, col2 = st.columns(2)
     units =  col1.number_input('Number of Units', step=1, key=f'units_{num_layer}')
     activation = col2.selectbox('Activation Function', activation_functions, index=6, key=f'activation_{num_layer}')
@@ -237,6 +239,7 @@ def simple_rnn_params(num_layer):
 
     return {
         'layer': 'SimpleRNN',
+        'bidirectional': bidirectional,
         'units': int(units),
         'activation': activation,
         'use_bias': bias,
@@ -260,6 +263,8 @@ def simple_rnn_params(num_layer):
     }
 
 def lstm_params(num_layer):
+    bidirectional = st.checkbox('Add Bidirectional Wrapper', key=f'bidirectional_{num_layer}')
+    
     col1, col2 = st.columns(2)
     units =  col1.number_input('Number of Units', step=1, key=f'units_{num_layer}')
     activation = col2.selectbox('Activation Function', activation_functions, index=6, key=f'activation_{num_layer}')
@@ -302,6 +307,7 @@ def lstm_params(num_layer):
 
     return {
         'layer': 'LSTM',
+        'bidirectional': bidirectional,
         'units': int(units),
         'activation': activation,
         'recurrent_activation': recurrent_activation,
@@ -328,6 +334,8 @@ def lstm_params(num_layer):
     }
 
 def gru_params(num_layer, init):
+    bidirectional = st.checkbox('Add Bidirectional Wrapper', key=f'bidirectional_{num_layer}')
+    
     col1, col2 = st.columns(2)
     if init:
         units =  col1.number_input('Number of Units', step=1, value=128, key=f'units_{num_layer}')
@@ -376,6 +384,7 @@ def gru_params(num_layer, init):
 
     return {
         'layer': 'GRU',
+        'bidirectional': bidirectional,
         'units': int(units),
         'activation': activation,
         'recurrent_activation': recurrent_activation,
