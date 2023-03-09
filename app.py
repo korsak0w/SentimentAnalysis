@@ -22,54 +22,16 @@ from tensorflow_hub import KerasLayer
 ######################
 # Page Title
 ######################
-
 st.write(messages.APP_INFO)
 
 ######################
 # Session States
 ######################
 
-states = [
-    # Upload Dataset
-    'df',
-    'use_default',
-
-    # Preprocessing
-    'train_set',
-    'val_set',
-    'test_set',
-    'vocab_size',
-    'num_oov_buckets',
-    'table',
-    'test_labels',
-    'batch_size',
-    
-    # Build Model
-    'model',
-    'model_built',
-    'use_raw_ds',
-
-    # Compile
-    'model_compiled',
-
-    # Train
-    'history',
-
-    # Evaluate
-    'fig_acc_loss',
-    'scores_df',
-    'fig_cm',
-    'fig_roc',
-
-    # Pretrained
-    'raw_train_set',
-    'raw_val_set',
-    'raw_test_set',
-]
+states = options.states
 
 for state in states:
     st.session_state.setdefault(state, None)
-
 
 
 ######################
@@ -79,7 +41,7 @@ st.header('Upload Your Dataset')
 
 # Upload file section
 file_upload_section = st.empty()
-uploaded_file = file_upload_section.file_uploader("Select a file from your hard drive")
+uploaded_file = file_upload_section.file_uploader(messages.SELECT_INFO)
 
 # Disable default dataset
 if uploaded_file:
@@ -120,10 +82,11 @@ st.write(messages.BREAK)
 if st.session_state.df is not None:
     st.header('Preprocess Your Dataset')
     st.write(messages.PREPROCESSING_INFO)
+    df = st.session_state.df
     
     # Creates two selectboxes for column selection
     col1, col2 = st.columns(2)
-    columns = list(st.session_state['df'].columns.values)
+    columns = list(df.columns.values)
     column_X = col1.selectbox('Select Input Column', columns, index=0)
     column_y = col2.selectbox('Select Label Column', columns, index=1)
     
@@ -139,47 +102,52 @@ if st.session_state.df is not None:
     num_oov_buckets = col6.number_input('Number of OOV Buckets', step=1, value=1000)
     
     # Preprocess the datasets
-    if st.button('Start Preprocessing'):
-        df = st.session_state['df']
+    if not st.session_state.train_set:
+        if st.button('Start Preprocessing'):
+            df = fnc.encode_labels(df, column_y)
+            train_set, val_set, test_set = fnc.split_dataset(df, test_train_split)
+            test_labels = test_set.iloc[:, 1]
 
-        df = fnc.encode_labels(df, column_y)
-        train_set, val_set, test_set = fnc.split_dataset(df, test_train_split)
-        test_labels = test_set.iloc[:, 1]
-        
-        # Transform dataframes into tf datasets
-        train_set = fnc.create_tensorflow_dataset(train_set, column_X, column_y)
-        val_set = fnc.create_tensorflow_dataset(val_set, column_X, column_y)
-        test_set = fnc.create_tensorflow_dataset(test_set, column_X, column_y)
+            # Transform dataframes into tf datasets
+            train_set = fnc.create_tensorflow_dataset(train_set, column_X, column_y)
+            val_set = fnc.create_tensorflow_dataset(val_set, column_X, column_y)
+            test_set = fnc.create_tensorflow_dataset(test_set, column_X, column_y)
 
-        # Create the lookup table
-        vocabulary = fnc.create_vocabulary(train_set, batch_size, vocab_size)
-        table = fnc.create_lookup_table(vocabulary, num_oov_buckets)
+            # Create the lookup table
+            vocabulary = fnc.create_vocabulary(train_set, batch_size, vocab_size)
+            table = fnc.create_lookup_table(vocabulary, num_oov_buckets)
 
-        # Encode the datasets
-        datasets = [train_set, val_set, test_set]
-        train_set, val_set, test_set = fnc.encode_datasets(datasets, batch_size, table)
-        
-        # ! TEST
-        raw_train_set, raw_val_set, raw_test_set = fnc.extract_raw_datasets(df, test_train_split, column_X, column_y, batch_size)
+            # Encode the datasets
+            datasets = [train_set, val_set, test_set]
+            train_set, val_set, test_set = fnc.encode_datasets(datasets, batch_size, table)
+            
+            # Extract raw sets for pretrained models
+            raw_train_set, raw_val_set, raw_test_set = fnc.extract_raw_datasets(
+                df,
+                test_train_split,
+                column_X,
+                column_y,
+                batch_size
+                )
 
-        # Update sessions
-        data_dict = {
-        'train_set': train_set,
-        'val_set': val_set,
-        'test_set': test_set,
-        'vocab_size': vocab_size,
-        'num_oov_buckets': num_oov_buckets,
-        'table': table,
-        'test_labels': test_labels,
-        'batch_size': batch_size,
+            # Update sessions
+            data_dict = {
+            'train_set': train_set,
+            'val_set': val_set,
+            'test_set': test_set,
+            'vocab_size': vocab_size,
+            'num_oov_buckets': num_oov_buckets,
+            'table': table,
+            'test_labels': test_labels,
+            'batch_size': batch_size,
 
-        'raw_train_set': raw_train_set,
-        'raw_val_set': raw_val_set,
-        'raw_test_set': raw_test_set,
-        }
-        st.session_state.update(data_dict)
+            'raw_train_set': raw_train_set,
+            'raw_val_set': raw_val_set,
+            'raw_test_set': raw_test_set,
+            }
+            st.session_state.update(data_dict)
 
-    if st.session_state['train_set']:
+    if st.session_state.train_set:
         st.success(messages.SUCCESS_PREP)
     
     st.write(messages.BREAK)
@@ -188,9 +156,6 @@ if st.session_state.df is not None:
 ######################
 # Build Model
 ######################
-
-# ! Add Bidirectional layer (for LSTM or GRU)
-# ! Add 1D Convolutional layers
 
 if st.session_state.train_set:
     st.header('Build Your Model')
@@ -229,7 +194,7 @@ if st.session_state.train_set:
             if col2.button('-') and len(st.session_state.model_layers) > 0:
                 st.session_state.model_layers.pop()
                 st.session_state.info_dict.popitem()
-    
+
     # Add layers and hyperparameters
     input_dim = st.session_state['vocab_size'] + st.session_state['num_oov_buckets']
     for i, layer in enumerate(st.session_state.model_layers):
@@ -261,7 +226,7 @@ if st.session_state.train_set:
         st.session_state.info_dict[layer_number] = infos
 
     # Build sequential model
-    if len(st.session_state.info_dict):
+    if len(st.session_state.info_dict) and not st.session_state.model_built:
         if st.button('Build Model'):
             st.session_state.model = Sequential()
             info_dict = st.session_state.info_dict
@@ -274,6 +239,8 @@ if st.session_state.train_set:
                 st.session_state.model.add(layer_class(**hyper_params))
             st.session_state.info_dict = info_dict
             st.session_state.model_built = True
+    elif len(st.session_state.info_dict) and st.session_state.model_built:
+        pass
     else:
         st.warning(messages.NUM_LAYER_WARNING)
      
@@ -299,13 +266,14 @@ if st.session_state.model_built:
     loss_function = col2.selectbox('Loss Function', loss_functions, index=6)
 
     # Compile the model
-    if st.button('Compile Model'):
-        st.session_state.model.compile(
-            loss=loss_function,
-            optimizer=optimizer,
-            metrics=['accuracy']
-            )
-        st.session_state.model_compiled = True
+    if not st.session_state.model_compiled:
+        if st.button('Compile Model'):
+            st.session_state.model.compile(
+                loss=loss_function,
+                optimizer=optimizer,
+                metrics=['accuracy']
+                )
+            st.session_state.model_compiled = True
 
     # Print model summary
     if st.session_state.model_compiled:
@@ -327,9 +295,7 @@ if st.session_state.model_compiled:
     st.header('Train Your Model')
     st.write(messages.TRAINING_INFO)
 
-    num_epochs = st.number_input('Epochs', step=1)
-    
-    # ! testing
+    # Choose the correct train and val set
     if st.session_state.use_raw_ds:
         train_set = st.session_state.raw_train_set
         val_set = st.session_state.raw_val_set
@@ -337,13 +303,20 @@ if st.session_state.model_compiled:
         train_set = st.session_state.train_set
         val_set = st.session_state.val_set
 
-    if st.button('Train Model'):
-        st.session_state.history = st.session_state.model.fit(
-            train_set,
-            epochs=num_epochs,
-            validation_data=val_set,
-            callbacks=[callbacks.StreamlitCallback(num_epochs)]
-            )
+    num_epochs = st.number_input('Epochs', step=1)
+    num_steps = len(train_set)
+
+    # Train the model
+    if not st.session_state.history:
+        if st.button('Train Model'):
+            st.session_state.history = st.session_state.model.fit(
+                train_set,
+                epochs=num_epochs,
+                validation_data=val_set,
+                callbacks=[
+                callbacks.PrintCallback(num_epochs),
+                callbacks.ProgressCallback(num_steps),
+                ])
 
     if st.session_state.history:
         st.success(messages.SUCCESS_TRAIN)
@@ -359,47 +332,49 @@ if st.session_state.history:
     st.header('Evaluate Your Model')
     st.write(messages.EVALUATE_INFO)
     
-    if st.button('Evaluate Model'):
-        model = st.session_state.model
-        test_labels = st.session_state.test_labels
+    if not st.session_state.fig_acc_loss:
+        if st.button('Evaluate Model'):
+            model = st.session_state.model
+            test_labels = st.session_state.test_labels
 
-        if st.session_state.use_raw_ds:
-            test_set = st.session_state.raw_test_set
-        else:
-            test_set = st.session_state.test_set
-        
-        # Predict y on test set and evaluate
-        pred_test = (model.predict(test_set) > 0.5).astype("int32")
-        accuracy, precision, recall, f1 = fnc.get_metrics(
-            test_labels,
-            pred_test.flatten()
-            )
-        scores = {
-            'Accuracy': accuracy,
-            'Precision': precision,
-            'Recall': recall,
-            'F1 Score': f1
+            # Choose the correct test set
+            if st.session_state.use_raw_ds:
+                test_set = st.session_state.raw_test_set
+            else:
+                test_set = st.session_state.test_set
+            
+            # Predict ŷ on test set and evaluate with y
+            pred_test = (model.predict(test_set) > 0.5).astype("int32")
+            accuracy, precision, recall, f1 = fnc.get_metrics(
+                test_labels,
+                pred_test.flatten()
+                )
+            scores = {
+                'Accuracy': accuracy,
+                'Precision': precision,
+                'Recall': recall,
+                'F1 Score': f1
+                }
+            
+            # Create dataframe
+            scores_df = pd.DataFrame(scores, index=[0]).rename(index={0: 'Score'})
+
+            # Create figures
+            fig_acc_loss = fnc.acc_loss_over_time()
+            cm = fnc.display_confusion_matrix(test_labels, pred_test.flatten())
+            fig_cm = fnc.plot_confusion_matrix(cm)
+            fpr, tpr, thresholds = roc_curve(test_labels, pred_test.flatten())
+            roc_auc = auc(fpr, tpr)
+            fig_roc = fnc.plot_roc_curve(fpr, tpr, roc_auc)
+
+            # Update sessions
+            data_dict = {
+            'fig_acc_loss': fig_acc_loss,
+            'scores_df': scores_df,
+            'fig_cm': fig_cm,
+            'fig_roc': fig_roc,
             }
-        
-        # Create dataframe
-        scores_df = pd.DataFrame(scores, index=[0]).rename(index={0: 'Score'})
-
-        # Create figures
-        fig_acc_loss = fnc.acc_loss_over_time()
-        cm = fnc.display_confusion_matrix(test_labels, pred_test.flatten())
-        fig_cm = fnc.plot_confusion_matrix(cm)
-        fpr, tpr, thresholds = roc_curve(test_labels, pred_test.flatten())
-        roc_auc = auc(fpr, tpr)
-        fig_roc = fnc.plot_roc_curve(fpr, tpr, roc_auc)
-
-        # Update sessions
-        data_dict = {
-        'fig_acc_loss': fig_acc_loss,
-        'scores_df': scores_df,
-        'fig_cm': fig_cm,
-        'fig_roc': fig_roc,
-        }
-        st.session_state.update(data_dict)
+            st.session_state.update(data_dict)
     
     # Display dataframe and figures
     if st.session_state.fig_acc_loss:
