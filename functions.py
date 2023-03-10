@@ -116,6 +116,7 @@ activation_functions = [None, "relu", "sigmoid", "softmax", "softplus", "softsig
 weight_initializers = ['random_normal', 'random_uniform', 'truncated_normal', 'zeros', 'ones', 'glorot_normal', 'glorot_uniform', 'he_normal', 'he_uniform', 'identity', 'orthogonal']
 weight_regularizers = [None, 'l1', 'l2', 'l1_l2']
 
+# ! rewrite functions -> see training block 
 def create_infos(layer_type, num_layer, input_dim, init):
     with st.expander('Hyperparameters'):
         if layer_type == 'Dense Layer':
@@ -199,6 +200,8 @@ def embedding_params(num_layer, input_dim, init):
     }
 
 def simple_rnn_params(num_layer):
+    bidirectional = st.checkbox('Add Bidirectional Wrapper', key=f'bidirectional_{num_layer}')
+    
     col1, col2 = st.columns(2)
     units =  col1.number_input('Number of Units', step=1, key=f'units_{num_layer}')
     activation = col2.selectbox('Activation Function', activation_functions, index=6, key=f'activation_{num_layer}')
@@ -237,6 +240,7 @@ def simple_rnn_params(num_layer):
 
     return {
         'layer': 'SimpleRNN',
+        'bidirectional': bidirectional,
         'units': int(units),
         'activation': activation,
         'use_bias': bias,
@@ -260,6 +264,8 @@ def simple_rnn_params(num_layer):
     }
 
 def lstm_params(num_layer):
+    bidirectional = st.checkbox('Add Bidirectional Wrapper', key=f'bidirectional_{num_layer}')
+    
     col1, col2 = st.columns(2)
     units =  col1.number_input('Number of Units', step=1, key=f'units_{num_layer}')
     activation = col2.selectbox('Activation Function', activation_functions, index=6, key=f'activation_{num_layer}')
@@ -302,6 +308,7 @@ def lstm_params(num_layer):
 
     return {
         'layer': 'LSTM',
+        'bidirectional': bidirectional,
         'units': int(units),
         'activation': activation,
         'recurrent_activation': recurrent_activation,
@@ -328,6 +335,8 @@ def lstm_params(num_layer):
     }
 
 def gru_params(num_layer, init):
+    bidirectional = st.checkbox('Add Bidirectional Wrapper', key=f'bidirectional_{num_layer}')
+    
     col1, col2 = st.columns(2)
     if init:
         units =  col1.number_input('Number of Units', step=1, value=128, key=f'units_{num_layer}')
@@ -376,6 +385,7 @@ def gru_params(num_layer, init):
 
     return {
         'layer': 'GRU',
+        'bidirectional': bidirectional,
         'units': int(units),
         'activation': activation,
         'recurrent_activation': recurrent_activation,
@@ -413,7 +423,67 @@ def pretrained_embedding_params(num_layer):
 
 
 ######################
-# Evaluate
+# Train Model
+######################
+
+def create_cb_options(name):
+    callback_map = {
+        'EarlyStopping': create_early_stopping,
+        'ReduceLROnPlateau': create_reduce_lr_on_plateau
+    }
+    return callback_map[name]()
+
+def create_early_stopping():
+    with st.expander('EarlyStopping Options'):
+        col1, col2 = st.columns(2)
+        monitor = col1.selectbox('Monitor', ("loss", "val_loss"), index=1, key='es_monitor')
+        min_delta = col2.number_input('Min Delta', min_value=0.00)
+
+        col3, col4 = st.columns(2)
+        patience = col3.number_input('Patience', min_value=0, key='es_patience')
+        mode = col4.selectbox('Mode', ("auto", "min", "max"), key='es_mode')
+
+        col5, col6 = st.columns(2)
+        baseline = col5.number_input('Baseline', min_value=0.0)
+        restore_best_weights = col6.selectbox('Restore Best Weights', (False, True))
+        
+    return {
+        'monitor': monitor,
+        'min_delta': min_delta,
+        'patience': patience,
+        'verbose': 0,
+        'mode': mode,
+        'baseline': baseline,
+        'restore_best_weights': restore_best_weights,
+    }
+
+def create_reduce_lr_on_plateau():
+    with st.expander('ReduceLROnPlateau Options'):
+        col1, col2 = st.columns(2)
+        monitor = col1.selectbox('Monitor', ("loss", "val_loss"), index=1, key='rlr_monitor')
+        factor = col2.number_input('Factor', min_value=0.1, max_value=0.9, step=0.1)
+
+        col3, col4 = st.columns(2)
+        patience = col3.number_input('Patience', min_value=0, key='rlr_patience')
+        mode = col4.selectbox('Mode', ("auto", "min", "max"), key='rlr_mode')
+
+        col5, col6 = st.columns(2)
+        cooldown = col5.number_input('Cooldown', min_value=0)
+        min_lr = col6.number_input('Min LR', min_value=0.0000, value=0.0000, step=0.0001, format="%f",)
+    
+    return {
+        'monitor': monitor,
+        'factor': factor,
+        'patience': patience,
+        'verbose': 0,
+        'mode': mode,
+        'min_delta': 0.0001,
+        'cooldown': cooldown,
+        'min_lr': min_lr,
+    }
+
+######################
+# Evaluate Model
 ######################
 
 def acc_loss_over_time():
@@ -456,10 +526,7 @@ def get_metrics(true_labels, predicted_labels):
     return accuracy, precision, recall, f1
 
 def display_confusion_matrix(true_labels, predicted_labels, classes=[1,0]):
-    total_classes = len(classes)
-    level_labels = [total_classes*[0], list(range(total_classes))]
-    cm = metrics.confusion_matrix(y_true=true_labels, y_pred=predicted_labels, labels=classes)
-    return cm
+    return metrics.confusion_matrix(y_true=true_labels, y_pred=predicted_labels, labels=classes)
 
 def plot_confusion_matrix(conf_mx):
     fig, ax = plt.subplots(figsize=(8, 8))

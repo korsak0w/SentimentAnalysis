@@ -1,3 +1,43 @@
+import tensorflow as tf
+
+states = [
+    # Upload Dataset
+    'df',
+    'use_default',
+
+    # Preprocessing
+    'train_set',
+    'val_set',
+    'test_set',
+    'vocab_size',
+    'num_oov_buckets',
+    'table',
+    'test_labels',
+    'batch_size',
+    
+    # Build Model
+    'model',
+    'model_built',
+    'use_raw_ds',
+
+    # Compile
+    'model_compiled',
+
+    # Train
+    'history',
+
+    # Evaluate
+    'fig_acc_loss',
+    'scores_df',
+    'fig_cm',
+    'fig_roc',
+
+    # Pretrained
+    'raw_train_set',
+    'raw_val_set',
+    'raw_test_set',
+]
+
 batch_options = [16, 32, 64, 128, 256, 512, 1024, 2048]
 
 layer_options = [
@@ -10,14 +50,14 @@ layer_options = [
         ]
 
 optimizers = [
-        'sgd',
-        'rmsprop',
-        'adagrad',
-        'adadelta',
-        'adam',
-        'adamax',
-        'nadam',
-        'ftrl'
+        'SGD',
+        'RMSprop',
+        'Adagrad',
+        'Adadelta',
+        'Adam',
+        'Adamax',
+        'Nadam',
+        'Ftrl',
     ]
 
 loss_functions = [
@@ -42,3 +82,24 @@ text_embeddings = [
     'https://tfhub.dev/google/nnlm-de-dim50/2',
     'https://tfhub.dev/google/nnlm-de-dim128/2',
 ]
+
+optimizer_dict = {
+        'SGD': tf.keras.optimizers.SGD,
+        'RMSprop': tf.keras.optimizers.RMSprop,
+        'Adagrad': tf.keras.optimizers.Adagrad,
+        'Adadelta': tf.keras.optimizers.Adadelta,
+        'Adam': tf.keras.optimizers.Adam,
+        'Adamax': tf.keras.optimizers.Adamax,
+        'Nadam': tf.keras.optimizers.Nadam,
+        'Ftrl': tf.keras.optimizers.Ftrl,
+    }
+
+callback_options = [
+    'EarlyStopping',
+    'ReduceLROnPlateau',
+]
+
+cb_dict = {
+        'EarlyStopping': tf.keras.callbacks.EarlyStopping,
+        'ReduceLROnPlateau': tf.keras.callbacks.ReduceLROnPlateau,
+    }
