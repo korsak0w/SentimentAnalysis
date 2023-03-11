@@ -12,6 +12,8 @@ BREAK = """
 # Upload Dataset
 ######################
 
+SELECT_INFO = "Select a file from your hard drive"
+
 DEFAULT_DATASET_INFO = "The **Large Movie Review Dataset** is a comprehensive collection of movie reviews that is commonly used as a **benchmark dataset** for binary sentiment classification tasks. It consists of 50,000 movie reviews, with 25,000 reviews for training and another 25,000 for testing. For more information, please read the paper ***Learning Word Vectors for Sentiment Analysis*** https://aclanthology.org/P11-1015/."
 
 DATASET_PREPARATION_WARNING = """
