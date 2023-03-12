@@ -3,73 +3,43 @@
 ######################
 import streamlit as st
 import pandas as pd
+import numpy as np
 import tensorflow as tf
+
 import functions as fnc
+import custom_layers
 import messages
 import callbacks
 import options
 
 from sklearn.metrics import roc_curve, auc
 from keras.models import Sequential
+from keras.layers import Input
 from keras.layers import Dense
 from keras.layers import Embedding
 from keras.layers import SimpleRNN
 from keras.layers import LSTM
 from keras.layers import GRU
+from keras.layers import Bidirectional
+from keras.layers import Dropout
+from keras.layers import GlobalAveragePooling1D
 from tensorflow_hub import KerasLayer
 
 
 ######################
 # Page Title
 ######################
-
 st.write(messages.APP_INFO)
+
 
 ######################
 # Session States
 ######################
 
-states = [
-    # Upload Dataset
-    'df',
-    'use_default',
-
-    # Preprocessing
-    'train_set',
-    'val_set',
-    'test_set',
-    'vocab_size',
-    'num_oov_buckets',
-    'table',
-    'test_labels',
-    'batch_size',
-    
-    # Build Model
-    'model',
-    'model_built',
-    'use_raw_ds',
-
-    # Compile
-    'model_compiled',
-
-    # Train
-    'history',
-
-    # Evaluate
-    'fig_acc_loss',
-    'scores_df',
-    'fig_cm',
-    'fig_roc',
-
-    # Pretrained
-    'raw_train_set',
-    'raw_val_set',
-    'raw_test_set',
-]
+states = options.states
 
 for state in states:
     st.session_state.setdefault(state, None)
-
 
 
 ######################
@@ -79,7 +49,7 @@ st.header('Upload Your Dataset')
 
 # Upload file section
 file_upload_section = st.empty()
-uploaded_file = file_upload_section.file_uploader("Select a file from your hard drive")
+uploaded_file = file_upload_section.file_uploader(messages.SELECT_INFO)
 
 # Disable default dataset
 if uploaded_file:
@@ -93,18 +63,18 @@ if use_default:
     st.write(messages.DEFAULT_DATASET_INFO)
     file_upload_section.empty()
     default_df = fnc.create_default_df()
-    st.session_state['df'] = default_df
+    st.session_state.df = default_df
     st.text(fnc.create_pd_info(default_df))
 
 # Load uploaded file and display warning if necessary
 else:
-    st.session_state['use_default'] = False
-    st.session_state['df'] = None
+    st.session_state.use_default = False
+    st.session_state.df = None
 
     if uploaded_file:
         try:
-            st.session_state['df'] = pd.read_csv(uploaded_file)
-            st.text(fnc.create_pd_info(st.session_state['df']))
+            st.session_state.df = pd.read_csv(uploaded_file)
+            st.text(fnc.create_pd_info(st.session_state.df))
             st.warning(messages.DATASET_PREPARATION_WARNING)
         except Exception as e:
             st.warning(messages.FILE_LOADING_ERROR)
@@ -120,10 +90,11 @@ st.write(messages.BREAK)
 if st.session_state.df is not None:
     st.header('Preprocess Your Dataset')
     st.write(messages.PREPROCESSING_INFO)
+    df = st.session_state.df
     
     # Creates two selectboxes for column selection
     col1, col2 = st.columns(2)
-    columns = list(st.session_state['df'].columns.values)
+    columns = list(df.columns.values)
     column_X = col1.selectbox('Select Input Column', columns, index=0)
     column_y = col2.selectbox('Select Label Column', columns, index=1)
     
@@ -135,51 +106,52 @@ if st.session_state.df is not None:
 
     # Create inputs for the size of the vocab and buckets
     col5, col6 = st.columns(2)
-    vocab_size = col5.number_input('Vocabulary Size', step=1, value=10000)
-    num_oov_buckets = col6.number_input('Number of OOV Buckets', step=1, value=1000)
+    maxlen = col5.number_input('Max Sequence Length', min_value=1, value=300)
+    vocab_size = col6.number_input('Vocabulary Size', step=1, value=10000)
     
     # Preprocess the datasets
     if st.button('Start Preprocessing'):
-        df = st.session_state['df']
-
+        # encode labels and split df
         df = fnc.encode_labels(df, column_y)
         train_set, val_set, test_set = fnc.split_dataset(df, test_train_split)
-        test_labels = test_set.iloc[:, 1]
         
-        # Transform dataframes into tf datasets
-        train_set = fnc.create_tensorflow_dataset(train_set, column_X, column_y)
-        val_set = fnc.create_tensorflow_dataset(val_set, column_X, column_y)
-        test_set = fnc.create_tensorflow_dataset(test_set, column_X, column_y)
+        # seperate text and labels
+        X_train_txt, y_train = fnc.seperate_columns(train_set, column_X, column_y)
+        X_val_txt, y_val = fnc.seperate_columns(val_set, column_X, column_y)
+        X_test_txt, y_test = fnc.seperate_columns(test_set, column_X, column_y)
 
-        # Create the lookup table
-        vocabulary = fnc.create_vocabulary(train_set, batch_size, vocab_size)
-        table = fnc.create_lookup_table(vocabulary, num_oov_buckets)
+        X_train_txt = fnc.preprocess(X_train_txt)
+        X_val_txt = fnc.preprocess(X_val_txt)
+        X_test_txt = fnc.preprocess(X_test_txt)
 
-        # Encode the datasets
-        datasets = [train_set, val_set, test_set]
-        train_set, val_set, test_set = fnc.encode_datasets(datasets, batch_size, table)
-        
-        # ! TEST
-        raw_train_set, raw_val_set, raw_test_set = fnc.extract_raw_datasets(df, test_train_split, column_X, column_y, batch_size)
+        # Tokenizer
+        tokenizer = tf.keras.preprocessing.text.Tokenizer(num_words=vocab_size)
+        tokenizer.fit_on_texts(X_train_txt)
+
+        # Transform texts to int and pad to maxlen
+        X_train_int, X_val_int, X_test_int = fnc.transform_texts(
+            tokenizer, maxlen, X_train_txt, X_val_txt, X_test_txt
+            )
 
         # Update sessions
         data_dict = {
-        'train_set': train_set,
-        'val_set': val_set,
-        'test_set': test_set,
+        'X_train_int': X_train_int,
+        'X_train_txt': X_train_txt,
+        'y_train': y_train,
+        'X_val_int': X_val_int,
+        'X_val_txt': X_val_txt,
+        'y_val': y_val,
+        'X_test_int': X_test_int,
+        'X_test_txt': X_test_txt,
+        'y_test': y_test,
         'vocab_size': vocab_size,
-        'num_oov_buckets': num_oov_buckets,
-        'table': table,
-        'test_labels': test_labels,
         'batch_size': batch_size,
-
-        'raw_train_set': raw_train_set,
-        'raw_val_set': raw_val_set,
-        'raw_test_set': raw_test_set,
+        'maxlen': maxlen,
+        'tokenizer': tokenizer,
         }
         st.session_state.update(data_dict)
 
-    if st.session_state['train_set']:
+    if st.session_state.X_train_int is not None:
         st.success(messages.SUCCESS_PREP)
     
     st.write(messages.BREAK)
@@ -189,10 +161,7 @@ if st.session_state.df is not None:
 # Build Model
 ######################
 
-# ! Add Bidirectional layer (for LSTM or GRU)
-# ! Add 1D Convolutional layers
-
-if st.session_state.train_set:
+if st.session_state.X_train_int is not None:
     st.header('Build Your Model')
     st.write(messages.BUILD_INFO)
 
@@ -203,24 +172,29 @@ if st.session_state.train_set:
     # Arrays and dictionaries
     layer_options = options.layer_options
     layer_dict = {
+        'Input': Input,
         'Dense': Dense,
         'Embedding': Embedding,
         'SimpleRNN': SimpleRNN,
         'LSTM': LSTM,
         'GRU': GRU,
         'KerasLayer': KerasLayer,
+        'Dropout': Dropout,
+        'GlobalAveragePooling1D': GlobalAveragePooling1D,
+        'TokenAndPositionEmbedding': custom_layers.TokenAndPositionEmbedding,
+        'TransformerBlock': custom_layers.TransformerBlock,
         }
     default_index_dict = {
-        1: 1,
-        2: 4,
-        3: 4,
-        4: 0,
+        1: 2,
+        2: 5,
+        3: 5,
+        4: 1,
         }
 
-    # Create buttons to add and remove layers
     col1, col2 = st.columns([.05,1])
     MAX_LAYERS = 20
 
+    # Create buttons to add and remove layers
     if not st.session_state.model_built:
         with col1:
             if col1.button('+') and len(st.session_state.model_layers) <= MAX_LAYERS:
@@ -229,9 +203,10 @@ if st.session_state.train_set:
             if col2.button('-') and len(st.session_state.model_layers) > 0:
                 st.session_state.model_layers.pop()
                 st.session_state.info_dict.popitem()
-    
+
     # Add layers and hyperparameters
-    input_dim = st.session_state['vocab_size'] + st.session_state['num_oov_buckets']
+    vocab_size = st.session_state.vocab_size
+    maxlen = st.session_state.maxlen
     for i, layer in enumerate(st.session_state.model_layers):
         layer_number = i + 1
         # default layer adding
@@ -243,25 +218,26 @@ if st.session_state.train_set:
                 index=index,
                 key=f'layer_{layer_number}'
                 )
-            infos = fnc.create_infos(model_layer, layer_number, input_dim, init=True)
+            infos = fnc.create_infos(model_layer, layer_number, vocab_size, maxlen, init=True)
         # normal layer adding
         else:
             model_layer = st.selectbox(
                 f'Select Layer {layer_number}',
                 layer_options,
+                index=1,
                 key=f'layer_{layer_number}'
                 )
-            infos = fnc.create_infos(model_layer, layer_number, input_dim, init=False)
+            infos = fnc.create_infos(model_layer, layer_number, vocab_size, maxlen, init=False)
         
         # Flag to use raw dataset instead of preprocessed dataset
         if infos['layer'] == 'KerasLayer':
-            st.session_state.use_raw_ds = True
+            st.session_state.use_txt = True
 
         # Update session
         st.session_state.info_dict[layer_number] = infos
 
     # Build sequential model
-    if len(st.session_state.info_dict):
+    if len(st.session_state.info_dict) and not st.session_state.model_built:
         if st.button('Build Model'):
             st.session_state.model = Sequential()
             info_dict = st.session_state.info_dict
@@ -269,11 +245,20 @@ if st.session_state.train_set:
                 layer_type = info_dict[layer]['layer']
                 layer_class = layer_dict[layer_type]
                 hyper_params = {
-                    k: v for i, (k, v) in enumerate(info_dict[layer].items()) if i != 0
+                    # extracts the hyperparams from the info_dict
+                    k: v for i, (k, v) in enumerate(info_dict[layer].items())
+                    if i != 0 and k != 'bidirectional'
                     }
-                st.session_state.model.add(layer_class(**hyper_params))
+                # Decides if bidirectional wrapper should be added
+                if info_dict[layer].get('bidirectional', False):
+                    st.session_state.model.add(Bidirectional(layer_class(**hyper_params)))
+                else:
+                    st.session_state.model.add(layer_class(**hyper_params))
+
             st.session_state.info_dict = info_dict
             st.session_state.model_built = True
+    elif len(st.session_state.info_dict) and st.session_state.model_built:
+        pass
     else:
         st.warning(messages.NUM_LAYER_WARNING)
      
@@ -290,13 +275,26 @@ if st.session_state.train_set:
 if st.session_state.model_built:
     st.header('Compile Your Model')
     st.write(messages.COMPILE_INFO)
-
-    optimizers = options.optimizers
-    loss_functions = options.loss_functions
-
     col1, col2 = st.columns(2)
-    optimizer = col1.selectbox('Optimizer', optimizers, index=4)
-    loss_function = col2.selectbox('Loss Function', loss_functions, index=6)
+    
+    # Optimizer and lr
+    optimizers = options.optimizers
+    optimizer_dict = options.optimizer_dict
+    select_optimizer = col1.selectbox('Optimizer', optimizers, index=4)
+    default_lr = 0.01 if select_optimizer == 'SGD' else 0.001
+    learning_rate = col2.number_input(
+        label='Learning Rate',
+        min_value=1e-7,
+        step=0.001,
+        max_value=1.0,
+        value=default_lr,
+        format="%f",
+        )
+    optimizer = optimizer_dict[select_optimizer](lr=learning_rate)
+
+    # Loss function
+    loss_functions = options.loss_functions
+    loss_function = st.selectbox('Loss Function', loss_functions, index=6)
 
     # Compile the model
     if st.button('Compile Model'):
@@ -327,22 +325,33 @@ if st.session_state.model_compiled:
     st.header('Train Your Model')
     st.write(messages.TRAINING_INFO)
 
-    num_epochs = st.number_input('Epochs', step=1)
-    
-    # ! testing
-    if st.session_state.use_raw_ds:
-        train_set = st.session_state.raw_train_set
-        val_set = st.session_state.raw_val_set
-    else:
-        train_set = st.session_state.train_set
-        val_set = st.session_state.val_set
+    # Choose the correct train and val set
+    X_train = np.array(st.session_state.X_train_txt) \
+        if st.session_state.use_txt else st.session_state.X_train_int
+    X_val = np.array(st.session_state.X_val_txt) \
+        if st.session_state.use_txt else st.session_state.X_val_int
 
+    num_epochs = st.number_input('Epochs', min_value=1, step=1)
+    
+    num_steps = round(len(X_train) / st.session_state.batch_size)
+
+    # Select and configure callbacks
+    cb_select = st.multiselect('Select Callbacks', options.callback_options)
+    cb_options = {callback: fnc.create_cb_options(callback) for callback in cb_select}
+    cb_dict = options.cb_dict
+    my_callbacks = [cb_dict[cb](**cb_options[cb]) for cb in cb_options]
+
+    # Train the model
     if st.button('Train Model'):
+        my_callbacks.append(callbacks.PrintCallback(num_epochs))
+        my_callbacks.append(callbacks.ProgressCallback(num_steps))
+        
         st.session_state.history = st.session_state.model.fit(
-            train_set,
+            X_train,
+            st.session_state.y_train,
             epochs=num_epochs,
-            validation_data=val_set,
-            callbacks=[callbacks.StreamlitCallback(num_epochs)]
+            validation_data=(X_val, st.session_state.y_val),
+            callbacks=[my_callbacks]
             )
 
     if st.session_state.history:
@@ -361,17 +370,18 @@ if st.session_state.history:
     
     if st.button('Evaluate Model'):
         model = st.session_state.model
-        test_labels = st.session_state.test_labels
+        y_test = st.session_state.y_test
 
-        if st.session_state.use_raw_ds:
-            test_set = st.session_state.raw_test_set
+        # Choose the correct test set
+        if st.session_state.use_txt:
+            X_test = np.array(st.session_state.X_test_txt)
         else:
-            test_set = st.session_state.test_set
+            X_test = st.session_state.X_test_int
         
-        # Predict y on test set and evaluate
-        pred_test = (model.predict(test_set) > 0.5).astype("int32")
+        # Predict ŷ on test set and evaluate with y
+        pred_test = (model.predict(X_test) > 0.5).astype("int32")
         accuracy, precision, recall, f1 = fnc.get_metrics(
-            test_labels,
+            y_test,
             pred_test.flatten()
             )
         scores = {
@@ -386,9 +396,9 @@ if st.session_state.history:
 
         # Create figures
         fig_acc_loss = fnc.acc_loss_over_time()
-        cm = fnc.display_confusion_matrix(test_labels, pred_test.flatten())
+        cm = fnc.display_confusion_matrix(y_test, pred_test.flatten())
         fig_cm = fnc.plot_confusion_matrix(cm)
-        fpr, tpr, thresholds = roc_curve(test_labels, pred_test.flatten())
+        fpr, tpr, thresholds = roc_curve(y_test, pred_test.flatten())
         roc_auc = auc(fpr, tpr)
         fig_roc = fnc.plot_roc_curve(fpr, tpr, roc_auc)
 
@@ -425,15 +435,17 @@ if st.session_state.history:
     st.write(messages.INFERENCE_INFO)
 
     MAX_INPUT_LENGTH = 300
+    tokenizer = st.session_state.tokenizer
+    maxlen = st.session_state.maxlen
     text = st.text_area(messages.INFERENCE_TEXT)
-
+    
     if st.button('Predict Sentiment') and len(text) <= MAX_INPUT_LENGTH:
-        if not st.session_state.use_raw_ds:
-            tf_text = fnc.inf_preprocessing(text)
+        if not st.session_state.use_txt:
+            text = fnc.inf_preprocessing(tokenizer, maxlen, text)
         else:
             text = tf.expand_dims(text, 0)
-            tf_text = tf.data.Dataset.from_tensor_slices(text).batch(1)
-        result = st.session_state.model.predict(tf_text)
+            text = tf.data.Dataset.from_tensor_slices(text).batch(1)
+        result = st.session_state.model.predict(text)
         percentage = round(result[0][0] * 100)
         result_str = f"""
         There is a **{percentage}%** chance that your text has a positive sentiment.
