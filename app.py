@@ -106,8 +106,8 @@ if st.session_state.df is not None:
 
     # Create inputs for the size of the vocab and buckets
     col5, col6 = st.columns(2)
-    maxlen = col5.number_input('Max Sequence Length', min_value=1, value=300)
-    vocab_size = col6.number_input('Vocabulary Size', step=1, value=10000)
+    maxlen = col5.number_input('Max Sequence Length (Words)', min_value=1, value=100)
+    vocab_size = col6.number_input('Vocabulary Size (Words)', step=1, value=10000)
     
     # Preprocess the datasets
     if st.button('Start Preprocessing'):
@@ -152,6 +152,7 @@ if st.session_state.df is not None:
         st.session_state.update(data_dict)
 
     if st.session_state.X_train_int is not None:
+        st.session_state.prep_completed = True
         st.success(messages.SUCCESS_PREP)
     
     st.write(messages.BREAK)
@@ -166,7 +167,7 @@ if st.session_state.X_train_int is not None:
     st.write(messages.BUILD_INFO)
 
     # Set session states
-    st.session_state.setdefault("model_layers", ["Default_Layer"]*4)
+    st.session_state.setdefault("model_layers", ["Default_Layer"]*5)
     st.session_state.setdefault("info_dict", {})
 
     # Arrays and dictionaries
@@ -185,24 +186,26 @@ if st.session_state.X_train_int is not None:
         'TransformerBlock': custom_layers.TransformerBlock,
         }
     default_index_dict = {
-        1: 2,
-        2: 5,
-        3: 5,
-        4: 1,
+        1: 7,
+        2: 1,
+        3: 4,
+        4: 4,
+        5: 0,
         }
 
-    col1, col2 = st.columns([.05,1])
+    col1, col2, col3 = st.columns([.055,.05,1])
     MAX_LAYERS = 20
 
     # Create buttons to add and remove layers
     if not st.session_state.model_built:
-        with col1:
-            if col1.button('+') and len(st.session_state.model_layers) <= MAX_LAYERS:
-                st.session_state.model_layers.append("Layer")
-        with col2:
-            if col2.button('-') and len(st.session_state.model_layers) > 0:
-                st.session_state.model_layers.pop()
-                st.session_state.info_dict.popitem()
+        if col1.button('+') and len(st.session_state.model_layers) <= MAX_LAYERS:
+            st.session_state.model_layers.append("Layer")
+        if col2.button('-') and len(st.session_state.model_layers) > 0:
+            st.session_state.model_layers.pop()
+            st.session_state.info_dict.popitem()
+        if col3.button('Remove All') and len(st.session_state.model_layers) > 0:
+            st.session_state.model_layers = []
+            st.session_state.info_dict = {}
 
     # Add layers and hyperparameters
     vocab_size = st.session_state.vocab_size
@@ -224,7 +227,7 @@ if st.session_state.X_train_int is not None:
             model_layer = st.selectbox(
                 f'Select Layer {layer_number}',
                 layer_options,
-                index=1,
+                index=0,
                 key=f'layer_{layer_number}'
                 )
             infos = fnc.create_infos(model_layer, layer_number, vocab_size, maxlen, init=False)

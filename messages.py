@@ -56,6 +56,12 @@ SUCCESS_BUILD = "The model was built successfully!"
 
 LAYER_WARNING = "Please note that this layer was specifically implemented for use with transformer blocks. It may not be suitable for use in other types of neural networks."
 
+INPUT_OBJECT_INFO = "Defines an input placeholder with a shape of **(maxlen,)**, where maxlen represents the maximum length of the input sequence that will be fed into the network during training or inference."
+
+POOLING_INFO = "Computes the average of the feature maps in the time dimension (i.e., along the length of each sequence) of a 1D input tensor, which results in a **single output value per feature map**."
+
+PRETRAINED_WARNING = "When using this layer, **avoid using the Input Object** to prevent a shape mismatch as this layer expects a tensor shape of **(None,)**."
+
 ######################
 # Compile Model
 ######################

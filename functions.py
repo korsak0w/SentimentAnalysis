@@ -84,10 +84,7 @@ def transform_texts(tokenizer, maxlen, X_train, X_val, X_test):
 # Build Model
 ######################
 
-# ! Input layer warning
-# ! Pooling layer warning
-# ! pretrained embedding input shape warning 
-
+# ! default input object
 
 def create_infos(layer_type, num_layer, vocab_size, maxlen, init):
     def dense_params(num_layer, vocab_size, maxlen, init):
@@ -329,7 +326,7 @@ def create_infos(layer_type, num_layer, vocab_size, maxlen, init):
             recurrent_dropout = col14.slider('Recurrent Dropout', 0.0, 1.0, step=0.05, key=f'recurrent_dropout_{num_layer}')
 
             col15, col16 = st.columns(2)
-            if init and num_layer == 2:
+            if init and num_layer == 3:
                 return_sequences = col15.selectbox('Return Sequences', (True, False), key=f'return_sequences_{num_layer}')
             else:
                 return_sequences = col15.selectbox('Return Sequences', (False, True), key=f'return_sequences_{num_layer}')
@@ -370,7 +367,8 @@ def create_infos(layer_type, num_layer, vocab_size, maxlen, init):
     def pretrained_embedding_params(num_layer, vocab_size, maxlen, init):
         with st.expander('Hyperparameters'):
             handle = st.selectbox('Select Text Embedding', options.text_embeddings, key=f'url_{num_layer}')
-            
+            st.warning(messages.PRETRAINED_WARNING)
+
             return {
                 'layer': 'KerasLayer',
                 'handle': handle,
@@ -417,9 +415,11 @@ def create_infos(layer_type, num_layer, vocab_size, maxlen, init):
             }
 
     def input_params(num_layer, vocab_size, maxlen, init):
+        st.info(messages.INPUT_OBJECT_INFO)
         return {'layer': 'Input', 'shape': (maxlen,)}
     
     def global_avg_pooling_1d_params(num_layer, vocab_size, maxlen, init):
+        st.info(messages.POOLING_INFO)
         return {'layer': 'GlobalAveragePooling1D', 'data_format': 'channels_last'}
     
     layer_param_funcs = {
@@ -429,7 +429,7 @@ def create_infos(layer_type, num_layer, vocab_size, maxlen, init):
         'Long Short-Term Memory Layer': lstm_params,
         'Gated Recurrent Unit Layer': gru_params,
         'Pretrained Embedding Layer': pretrained_embedding_params,
-        'Input Layer': input_params,
+        'Input Object': input_params,
         'Dropout Layer': dropout_params,
         'Global Average Pooling 1D Layer': global_avg_pooling_1d_params,
         'Token And Position Embedding Layer': tp_embedding_params,

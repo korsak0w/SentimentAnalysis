@@ -19,6 +19,7 @@ states = [
     'batch_size',
     'maxlen',
     'tokenizer',
+    'prep_completed'
     
     # Build Model
     'model',
@@ -46,7 +47,6 @@ states = [
 batch_options = [16, 32, 64, 128, 256, 512, 1024, 2048]
 
 layer_options = [
-        'Input Layer',
         'Dense Layer',
         'Embedding Layer',
         'Simple Recurrent Neural Network Layer',
@@ -54,6 +54,7 @@ layer_options = [
         'Gated Recurrent Unit Layer',
         'Pretrained Embedding Layer',
         'Dropout Layer',
+        'Input Object',
         'Global Average Pooling 1D Layer',
         'Token And Position Embedding Layer',
         'Transformer Block',
