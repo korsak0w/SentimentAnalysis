@@ -8,9 +8,7 @@ import tensorflow as tf
 
 import functions as fnc
 import custom_layers
-import messages
 import callbacks
-import options
 
 from sklearn.metrics import roc_curve, auc
 from keras.models import Sequential
@@ -29,58 +27,117 @@ from tensorflow_hub import KerasLayer
 ######################
 # Page Title
 ######################
-st.write(messages.APP_INFO)
+APP_INFO = """
+# Sentiment Analysis with Keras
+**Build** and **train** your own model for sentiment analysis using Keras! You can **customize the network architecture**, **manage datasets**,  **train** and **evaluate** your model.
+***
+"""
+st.write(APP_INFO)
 
 
 ######################
 # Session States
 ######################
+states = [
+    # Upload Dataset
+    'df',
+    'use_default',
 
-states = options.states
+    # Preprocessing
+    'X_train_int',
+    'X_train_txt',
+    'y_train',
+    'X_val_int',
+    'X_val_txt',
+    'y_val',
+    'X_test_int',
+    'X_test_txt',
+    'y_test',
+    'vocab_size',
+    'batch_size',
+    'maxlen',
+    'tokenizer',
+    'prep_completed'
+    
+    # Build Model
+    'model',
+    'model_built',
+    'use_txt',
+
+    # Compile
+    'model_compiled',
+
+    # Train
+    'history',
+
+    # Evaluate
+    'fig_acc_loss',
+    'scores_df',
+    'fig_cm',
+    'fig_roc',
+
+    # Pretrained
+    'raw_train_set',
+    'raw_val_set',
+    'raw_test_set',
+]
+
+if 'key' not in st.session_state:
+    st.session_state['key'] = 0
 
 for state in states:
     st.session_state.setdefault(state, None)
 
+def in_wid_change():
+    for state in states:
+        st.session_state[state]= None 
 
 ######################
-# Upload Dataset
+# Data upload
 ######################
-st.header('Upload Your Dataset')
+st.header('Data upload')
 
-# Upload file section
 file_upload_section = st.empty()
-uploaded_file = file_upload_section.file_uploader(messages.SELECT_INFO)
+data_source=st.radio(
+    'Select data source',
+    ['Use example dataset','Upload data'],
+    index=0, key=st.session_state['key'],
+    on_change=in_wid_change
+    )  
+uploaded_file=None
 
-# Disable default dataset
-if uploaded_file:
-    use_default = st.checkbox('Use Default Dataset', disabled=True)
-else:
-    use_default = st.checkbox('Use Default Dataset', disabled=False)
-
-# Display default dataset information and create default dataframe
-if use_default:
-    st.session_state['use_default'] = True
-    st.write(messages.DEFAULT_DATASET_INFO)
-    file_upload_section.empty()
-    default_df = fnc.create_default_df()
-    st.session_state.df = default_df
-    st.text(fnc.create_pd_info(default_df))
-
-# Load uploaded file and display warning if necessary
-else:
+# upload data
+if data_source=='Upload data':
     st.session_state.use_default = False
     st.session_state.df = None
-
+    
+    col_sep, encoding_val = fnc.display_upload_settings()
+    uploaded_file = st.file_uploader("Default column separator ','", type=["csv", "txt"], on_change=in_wid_change)
+    
     if uploaded_file:
         try:
-            st.session_state.df = pd.read_csv(uploaded_file)
-            st.text(fnc.create_pd_info(st.session_state.df))
-            st.warning(messages.DATASET_PREPARATION_WARNING)
+            st.session_state.df = pd.read_csv(uploaded_file, sep=col_sep, encoding=encoding_val, engine='python')
+            DATASET_PREPARATION_WARNING = """
+                    When preparing a dataset for binary sentiment analysis, please keep in mind that your dataset must contain a column with text and a column with labels that can be binary encoded (e.g. positive and negative). 
+                    Additionally, your text and labels should not contain null-values. 
+                    Please ensure that your dataset meets these requirements before using it to train a binary sentiment analysis model.
+                """
+            st.warning(DATASET_PREPARATION_WARNING)
         except Exception as e:
-            st.warning(messages.FILE_LOADING_ERROR)
+            FILE_LOADING_ERROR = "Failed to load the file. Please check that it is a valid CSV file and try again."
+            st.error(FILE_LOADING_ERROR)
             st.exception(e)
 
-st.write(messages.BREAK)
+# use default data
+else:
+    st.session_state['use_default'] = True
+    default_df = fnc.create_default_df()
+    st.session_state.df = default_df
+    DEFAULT_DATASET_INFO = "The **Large Movie Review Dataset** is a comprehensive collection of movie reviews that is commonly used as a **benchmark dataset** for binary sentiment classification tasks. It consists of 50,000 movie reviews, with 25,000 reviews for training and another 25,000 for testing. For more information, please read the paper ***Learning Word Vectors for Sentiment Analysis*** https://aclanthology.org/P11-1015/."
+    st.write(DEFAULT_DATASET_INFO)
+
+
+st.write("""***""")
 
 
 ######################
@@ -88,44 +145,31 @@ st.write(messages.BREAK)
 ######################
 
 if st.session_state.df is not None:
-    st.header('Preprocess Your Dataset')
-    st.write(messages.PREPROCESSING_INFO)
+    st.header('Data Screening and Processing')
+    PREPROCESSING_INFO = """
+    During preprocessing, all **punctuation** is removed, words are converted to **lowercase**, and **split by spaces**. The words are then **indexed by frequency**, with low integers representing frequent words. Additionally, there are three special tokens: **0** represents padding, **1** represents the start-of-sequence (SOS) token, and **2** represents unknown words.
+    """
+    st.write(PREPROCESSING_INFO)
     df = st.session_state.df
     
-    # Creates two selectboxes for column selection
-    col1, col2 = st.columns(2)
-    columns = list(df.columns.values)
-    column_X = col1.selectbox('Select Input Column', columns, index=0)
-    column_y = col2.selectbox('Select Label Column', columns, index=1)
-    
-    # Create slider for split and batch size
-    col3, col4 = st.columns(2)
-    batch_options = options.batch_options
-    test_train_split = col3.slider('Test Train Split', 0.1, 0.9, step=0.1, value=(0.5))
-    batch_size = col4.select_slider('Batch Size', options=batch_options, value=32)
-
-    # Create inputs for the size of the vocab and buckets
-    col5, col6 = st.columns(2)
-    maxlen = col5.number_input('Max Sequence Length (Words)', min_value=1, value=100)
-    vocab_size = col6.number_input('Vocabulary Size (Words)', step=1, value=10000)
+    fnc.display_df_checkboxes(df)
+    column_X, column_y, test_train_split, maxlen, vocab_size = fnc.display_preprocess_options(df)
     
     # Preprocess the datasets
     if st.button('Start Preprocessing'):
         # encode labels and split df
         df = fnc.encode_labels(df, column_y)
+        # preoprocess data
+        df = fnc.preprocess(df, column_X)
+        # split data
         train_set, val_set, test_set = fnc.split_dataset(df, test_train_split)
-        
-        # seperate text and labels
+        # seperate labes from text
         X_train_txt, y_train = fnc.seperate_columns(train_set, column_X, column_y)
         X_val_txt, y_val = fnc.seperate_columns(val_set, column_X, column_y)
         X_test_txt, y_test = fnc.seperate_columns(test_set, column_X, column_y)
 
-        X_train_txt = fnc.preprocess(X_train_txt)
-        X_val_txt = fnc.preprocess(X_val_txt)
-        X_test_txt = fnc.preprocess(X_test_txt)
-
         # Tokenizer
-        tokenizer = tf.keras.preprocessing.text.Tokenizer(num_words=vocab_size)
+        tokenizer = tf.keras.preprocessing.text.Tokenizer(num_words=vocab_size, char_level=False)
         tokenizer.fit_on_texts(X_train_txt)
 
         # Transform texts to int and pad to maxlen
@@ -145,7 +189,6 @@ if st.session_state.df is not None:
         'X_test_txt': X_test_txt,
         'y_test': y_test,
         'vocab_size': vocab_size,
-        'batch_size': batch_size,
         'maxlen': maxlen,
         'tokenizer': tokenizer,
         }
@@ -153,9 +196,10 @@ if st.session_state.df is not None:
 
     if st.session_state.X_train_int is not None:
         st.session_state.prep_completed = True
-        st.success(messages.SUCCESS_PREP)
+        SUCCESS_PREP = "The dataset was successfully preprocessed!"
+        st.success(SUCCESS_PREP)
     
-    st.write(messages.BREAK)
+    st.write("""***""")
 
 
 ######################
@@ -164,14 +208,31 @@ if st.session_state.df is not None:
 
 if st.session_state.X_train_int is not None:
     st.header('Build Your Model')
-    st.write(messages.BUILD_INFO)
+    BUILD_INFO = """
+    You can add or remove layers by clicking on the (**+**) and (**-**) buttons, and each layer is displayed with a dropdown menu of **available layer types** (e.g., Dense, LSTM) and **input parameters** specific to that type.
+    
+    Once you have selected and configured your desired layers, you can click on the "Build Model" button to generate a **Sequential model** using the **Keras API**.
+    """
+    st.write(BUILD_INFO)
 
     # Set session states
     st.session_state.setdefault("model_layers", ["Default_Layer"]*5)
     st.session_state.setdefault("info_dict", {})
 
     # Arrays and dictionaries
-    layer_options = options.layer_options
+    layer_options = [
+        'Dense Layer',
+        'Embedding Layer',
+        'Simple Recurrent Neural Network Layer',
+        'Long Short-Term Memory Layer',
+        'Gated Recurrent Unit Layer',
+        'Pretrained Embedding Layer',
+        'Dropout Layer',
+        'Input Object',
+        'Global Average Pooling 1D Layer',
+        'Token And Position Embedding Layer',
+        'Transformer Block',
+        ]
     layer_dict = {
         'Input': Input,
         'Dense': Dense,
@@ -193,19 +254,8 @@ if st.session_state.X_train_int is not None:
         5: 0,
         }
 
-    col1, col2, col3 = st.columns([.055,.05,1])
     MAX_LAYERS = 20
-
-    # Create buttons to add and remove layers
-    if not st.session_state.model_built:
-        if col1.button('+') and len(st.session_state.model_layers) <= MAX_LAYERS:
-            st.session_state.model_layers.append("Layer")
-        if col2.button('-') and len(st.session_state.model_layers) > 0:
-            st.session_state.model_layers.pop()
-            st.session_state.info_dict.popitem()
-        if col3.button('Remove All') and len(st.session_state.model_layers) > 0:
-            st.session_state.model_layers = []
-            st.session_state.info_dict = {}
+    fnc.create_buttons(MAX_LAYERS)
 
     # Add layers and hyperparameters
     vocab_size = st.session_state.vocab_size
@@ -263,12 +313,14 @@ if st.session_state.X_train_int is not None:
     elif len(st.session_state.info_dict) and st.session_state.model_built:
         pass
     else:
-        st.warning(messages.NUM_LAYER_WARNING)
+        NUM_LAYER_WARNING = "You must add at least one layer to the model before you can build it!"
+        st.warning(NUM_LAYER_WARNING)
      
     if st.session_state.model_built:
-        st.success(messages.SUCCESS_BUILD)
+        SUCCESS_BUILD = "The model was built successfully!"
+        st.success(SUCCESS_BUILD)
     
-    st.write(messages.BREAK)
+    st.write("""***""")
 
 
 ######################
@@ -277,12 +329,34 @@ if st.session_state.X_train_int is not None:
 
 if st.session_state.model_built:
     st.header('Compile Your Model')
-    st.write(messages.COMPILE_INFO)
+    COMPILE_INFO = """
+    The process of compiling the model involves specifying the **loss function**, **optimizer**, and **evaluation metrics** that will be utilized to train and evaluate the model throughout the training process.
+    
+    Different combinations of optimizers, loss functions, and metrics can have a significant impact on the performance of the model, so it's important to **choose these hyperparameters carefully** and optimize them for the specific task at hand.
+    """
+    st.write(COMPILE_INFO)
     col1, col2 = st.columns(2)
     
     # Optimizer and lr
-    optimizers = options.optimizers
-    optimizer_dict = options.optimizer_dict
+    optimizers = [
+        'SGD',
+        'RMSprop',
+        'Adagrad',
+        'Adadelta',
+        'Adam',
+        'Adamax',
+        'Nadam',
+    ]
+    optimizer_dict = {
+        'SGD': tf.keras.optimizers.SGD,
+        'RMSprop': tf.keras.optimizers.RMSprop,
+        'Adagrad': tf.keras.optimizers.Adagrad,
+        'Adadelta': tf.keras.optimizers.Adadelta,
+        'Adam': tf.keras.optimizers.Adam,
+        'Adamax': tf.keras.optimizers.Adamax,
+        'Nadam': tf.keras.optimizers.Nadam,
+    }
+
     select_optimizer = col1.selectbox('Optimizer', optimizers, index=4)
     default_lr = 0.01 if select_optimizer == 'SGD' else 0.001
     learning_rate = col2.number_input(
@@ -296,7 +370,20 @@ if st.session_state.model_built:
     optimizer = optimizer_dict[select_optimizer](lr=learning_rate)
 
     # Loss function
-    loss_functions = options.loss_functions
+    loss_functions = [
+        'mean_squared_error',
+        'mean_absolute_error',
+        'mean_absolute_percentage_error',
+        'mean_squared_logarithmic_error',
+        'categorical_crossentropy',
+        'sparse_categorical_crossentropy',
+        'binary_crossentropy',
+        'hinge',
+        'squared_hinge',
+        'cosine_similarity',
+        'poisson',
+        'kullback_leibler_divergence',
+    ]
     loss_function = st.selectbox('Loss Function', loss_functions, index=6)
 
     # Compile the model
@@ -315,9 +402,10 @@ if st.session_state.model_built:
                 line_length=79,
                 print_fn=lambda x: st.text(x)
                 )
-        st.success(messages.SUCCESS_COMPILE)
+        SUCCESS_COMPILE = "The model was compiled successfully!"    
+        st.success(SUCCESS_COMPILE)
 
-    st.write(messages.BREAK)
+    st.write("""***""")
 
 
 ######################
@@ -326,7 +414,13 @@ if st.session_state.model_built:
 
 if st.session_state.model_compiled:
     st.header('Train Your Model')
-    st.write(messages.TRAINING_INFO)
+    TRAINING_INFO = """
+    After compiling the model, you can **specifying the number of epochs** and then train your model on the labeled training dataset.
+
+    During each epoch, the model is fed the entire training dataset, and the weights and biases of the model are adjusted to **minimize the loss function**. Typically, **multiple epochs are needed** to achieve good performance on the training dataset, but too many epochs can lead to overfitting, where the model performs well on the training data but poorly on new, unseen data.
+    """
+
+    st.write(TRAINING_INFO)
 
     # Choose the correct train and val set
     X_train = np.array(st.session_state.X_train_txt) \
@@ -336,12 +430,19 @@ if st.session_state.model_compiled:
 
     num_epochs = st.number_input('Epochs', min_value=1, step=1)
     
-    num_steps = round(len(X_train) / st.session_state.batch_size)
+    num_steps = round(len(X_train) / 32)
 
     # Select and configure callbacks
-    cb_select = st.multiselect('Select Callbacks', options.callback_options)
+    callback_options = [
+        'EarlyStopping',
+        'ReduceLROnPlateau',
+        ]
+    cb_select = st.multiselect('Select Callbacks', callback_options)
     cb_options = {callback: fnc.create_cb_options(callback) for callback in cb_select}
-    cb_dict = options.cb_dict
+    cb_dict = {
+        'EarlyStopping': tf.keras.callbacks.EarlyStopping,
+        'ReduceLROnPlateau': tf.keras.callbacks.ReduceLROnPlateau,
+    }
     my_callbacks = [cb_dict[cb](**cb_options[cb]) for cb in cb_options]
 
     # Train the model
@@ -358,9 +459,10 @@ if st.session_state.model_compiled:
             )
 
     if st.session_state.history:
-        st.success(messages.SUCCESS_TRAIN)
+        SUCCESS_TRAIN = "The model was trained successfully!"
+        st.success(SUCCESS_TRAIN)
 
-    st.write(messages.BREAK)
+    st.write("""***""")
 
 
 ######################
@@ -369,7 +471,11 @@ if st.session_state.model_compiled:
 
 if st.session_state.history:
     st.header('Evaluate Your Model')
-    st.write(messages.EVALUATE_INFO)
+    EVALUATE_INFO = """
+    When working with binary classifiers in Keras, it is important to **evaluate the performance** of the model using appropriate metrics. Some of the commonly used metrics for evaluating binary classifiers include **accuracy and loss over time**, **precision**, **recall**, **F1-score**, and **AUC-ROC**.
+    Evaluating the model using these metrics helps to identify areas where the model can be improved and to assess the overall performance of the classifier.
+    """
+    st.write(EVALUATE_INFO)
     
     if st.button('Evaluate Model'):
         model = st.session_state.model
@@ -413,20 +519,22 @@ if st.session_state.history:
         'fig_roc': fig_roc,
         }
         st.session_state.update(data_dict)
-    
-    # Display dataframe and figures
-    if st.session_state.fig_acc_loss:
-        st.success(messages.SUCCESS_EVALUATE)
-        st.write(messages.PERFORMANCE_METRICS)
-        st.write(st.session_state.scores_df)
-        with st.expander('Accuracy and Loss over time'):
-            st.pyplot(st.session_state.fig_acc_loss)
-        with st.expander('Confusion Matrix'):
-            st.pyplot(st.session_state.fig_cm)
-        with st.expander('Receiver Operating Characteristic (ROC)'):
-            st.pyplot(st.session_state.fig_roc)
-    
-    st.write(messages.BREAK)
+        
+        # Display dataframe and figures
+        if st.session_state.fig_acc_loss:
+            SUCCESS_EVALUATE = "The model was evaluated successfully!"
+            PERFORMANCE_METRICS = "**Model Performance Metrics on the Test Dataset**"
+            st.success(SUCCESS_EVALUATE)
+            st.write(PERFORMANCE_METRICS)
+            st.write(st.session_state.scores_df)
+            with st.expander('Accuracy and Loss over time'):
+                st.pyplot(st.session_state.fig_acc_loss)
+            with st.expander('Confusion Matrix'):
+                st.pyplot(st.session_state.fig_cm)
+            with st.expander('Receiver Operating Characteristic (ROC)'):
+                st.pyplot(st.session_state.fig_roc)
+        
+        st.write("""***""")
 
 
 ######################
@@ -435,14 +543,17 @@ if st.session_state.history:
 
 if st.session_state.history:
     st.header('Inference')
-    st.write(messages.INFERENCE_INFO)
+    INFERENCE_INFO = """
+    Machine learning inference is the stage in the development process where the knowledge acquired by the neural network during training is applied. The trained model is utilized to **make predictions** or inferences on **new** and **previously unseen data**. 
+    """
+    st.write(INFERENCE_INFO)
 
-    MAX_INPUT_LENGTH = 300
     tokenizer = st.session_state.tokenizer
     maxlen = st.session_state.maxlen
-    text = st.text_area(messages.INFERENCE_TEXT)
+    INFERENCE_TEXT = "Write something and let your model predict the sentiment."
+    text = st.text_area(INFERENCE_TEXT)
     
-    if st.button('Predict Sentiment') and len(text) <= MAX_INPUT_LENGTH:
+    if st.button('Predict Sentiment'):
         if not st.session_state.use_txt:
             text = fnc.inf_preprocessing(tokenizer, maxlen, text)
         else:
@@ -454,8 +565,5 @@ if st.session_state.history:
         There is a **{percentage}%** chance that your text has a positive sentiment.
         """
         st.info(result_str)
-    
-    # Warning for large text inputs
-    elif len(text) > MAX_INPUT_LENGTH:
-        st.warning(messages.TEXT_LEN_WARNING)
+
 

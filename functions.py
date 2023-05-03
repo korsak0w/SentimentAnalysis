@@ -7,17 +7,59 @@ import matplotlib.pyplot as plt
 import numpy as np
 import pandas as pd
 import io
-import options
-import messages
+import re
 
 from sklearn import metrics
 from collections import Counter
 from tensorflow import keras
 
+activation_functions = [
+    None,
+    "relu",
+    "sigmoid",
+    "softmax",
+    "softplus",
+    "softsign",
+    "tanh",
+    "selu",
+    "elu",
+    ]
+weight_initializers = [
+    'random_normal',
+    'random_uniform',
+    'truncated_normal',
+    'zeros',
+    'ones',
+    'glorot_normal',
+    'glorot_uniform',
+    'he_normal',
+    'he_uniform',
+    'orthogonal'
+    ]
+weight_regularizers = [
+    None,
+    'l1',
+    'l2',
+    'l1_l2'
+    ]
 
 ######################
 # Upload Dataset
 ######################
+
+def display_upload_settings():
+    separator_expander = st.expander('Upload settings')
+    with separator_expander:
+        a1, a2 = st.columns(2)
+        with a1:
+            col_sep = a1.selectbox("Column sep.", [',', ';', '|', '\\s+', '\\t', 'other'], key='col_sep')
+            if col_sep == 'other':
+                col_sep = st.text_input('Specify your column separator', key='col_sep_custom')
+        with a2:
+            encoding_val = a2.selectbox("Encoding", [None, 'utf8', 'utf_8', 'utf_8_sig', 'utf_16_le', 'cp1140', 'cp1250', 'cp1251', 'cp1252', 'cp1253', 'cp1254', 'other'], key='encoding_val')
+            if encoding_val == 'other':
+                encoding_val = st.text_input('Specify your encoding', key='encoding_val_custom')
+    return col_sep, encoding_val
 
 def create_default_df():
     df1 = pd.read_csv('data/IMDB_Dataset_Part1.csv')
@@ -40,13 +82,50 @@ def create_pd_info(df):
 # Preprocessing
 ######################
 
-def preprocess(texts):
-    texts_prepped = []
-    for text in texts:
-        text = tf.strings.regex_replace(text, b"<br\\s*/?>", b" ")
-        text = tf.strings.regex_replace(text, b"[^a-zA-Z']", b" ")
-        texts_prepped.append(text.numpy().decode('latin-1'))
-    return texts_prepped
+def display_df_checkboxes(df):
+    TXT_RAW_DATA = "Display Raw Data"
+    TXT_DATA_INFO = "Pandas DataFrame Info"
+
+    col1, col2 = st.columns(2)
+    if col1.checkbox(TXT_DATA_INFO, value = False, key = st.session_state['key']):
+        st.text(create_pd_info(df))
+    if col2.checkbox(TXT_RAW_DATA, value=False, key=st.session_state['key']):
+        st.dataframe(df)
+
+def display_preprocess_options(df):
+    COLUMNS_WARNING = "Please ensure that you select only one column for the input text and one column for the labels. Using multiple columns for either the input text or the labels may result in errors or unexpected behavior in your analysis or model."
+    columns = list(df.columns.values)
+
+    col1, col2 = st.columns(2)
+    column_X = col1.selectbox('Select Input Column', columns, index=0)
+    column_y = col2.selectbox('Select Label Column', columns, index=1)
+    if column_X==column_y: st.error(COLUMNS_WARNING)
+
+    test_train_split = st.slider('Test Train Split', 0.1, 0.9, step=0.1, value=(0.5))
+
+    col3, col4 = st.columns(2)
+    maxlen = col3.number_input('Max Sequence Length (Words)', min_value=1, value=100)
+    vocab_size = col4.number_input('Vocabulary Size (Words)', step=1, value=10000)
+    
+    return column_X, column_y, test_train_split, maxlen, vocab_size
+
+
+def preprocess(data, column_X):
+    # regex
+    data[column_X] = data[column_X].replace("<br\\s*/?>", " ", regex=True)
+    data[column_X] = data[column_X].apply(lambda x: re.sub(r"[^a-zA-ZäöüÄÖÜß']", " ", x))
+    # collapse multiple spaces to a single space
+    data[column_X] = data[column_X].apply(lambda x: re.sub(r"\s+", " ", x))
+    # lowercase
+    data[column_X] = data[column_X].apply(lambda x: x.lower())
+    # strip
+    data[column_X] = data[column_X].apply(lambda x: x.strip())
+    # remove null-values
+    data.dropna(subset=[column_X], inplace=True)
+    # shuffle
+    data = data.sample(frac=1)
+    data.reset_index(drop=True, inplace=True)
+    return data
 
 def encode_labels(dataset, column_y):
     labels = dataset[column_y].value_counts()
@@ -84,7 +163,16 @@ def transform_texts(tokenizer, maxlen, X_train, X_val, X_test):
 # Build Model
 ######################
 
-# ! default input object
+def create_buttons(max_layers):
+    col1, col2, col3 = st.columns([.055,.05,1])
+    if col1.button('+') and len(st.session_state.model_layers) <= max_layers:
+        st.session_state.model_layers.append("Layer")
+    if col2.button('-') and len(st.session_state.model_layers) > 0:
+        st.session_state.model_layers.pop()
+        st.session_state.info_dict.popitem()
+    if col3.button('Remove All') and len(st.session_state.model_layers) > 0:
+        st.session_state.model_layers = []
+        st.session_state.info_dict = {}
 
 def create_infos(layer_type, num_layer, vocab_size, maxlen, init):
     def dense_params(num_layer, vocab_size, maxlen, init):
@@ -92,26 +180,26 @@ def create_infos(layer_type, num_layer, vocab_size, maxlen, init):
             col1, col2 = st.columns(2)
             if init:
                 units = col1.number_input('Number of Units', step=1, value=1, key=f'units_{num_layer}')
-                activation = col2.selectbox('Activation Function', options.activation_functions, index=2, key=f'activation_{num_layer}')
+                activation = col2.selectbox('Activation Function', activation_functions, index=2, key=f'activation_{num_layer}')
             else:
                 units =  col1.number_input('Number of Units', step=1, key=f'units_{num_layer}')
-                activation = col2.selectbox('Activation Function', options.activation_functions, key=f'activation_{num_layer}')
+                activation = col2.selectbox('Activation Function', activation_functions, key=f'activation_{num_layer}')
 
             col3, col4 = st.columns(2)
             bias = col3.selectbox('Use Bias', (True, False), key=f'bias_{num_layer}')
-            kernel_initializer = col4.selectbox('Kernel Initializer', options.weight_initializers, index=6, key=f'kernel_initializer_{num_layer}')
+            kernel_initializer = col4.selectbox('Kernel Initializer', weight_initializers, index=6, key=f'kernel_initializer_{num_layer}')
 
             if bias:
                 col5, col6 = st.columns(2)
-                bias_initializer = col5.selectbox('Bias Initializer', options.weight_initializers, index=3, key=f'bias_initializer_{num_layer}')
-                bias_regularizer = col6.selectbox('Bias Regularizer', options.weight_regularizers, key=f'bias_regularizer_{num_layer}')
+                bias_initializer = col5.selectbox('Bias Initializer', weight_initializers, index=3, key=f'bias_initializer_{num_layer}')
+                bias_regularizer = col6.selectbox('Bias Regularizer', weight_regularizers, key=f'bias_regularizer_{num_layer}')
             else:
                 bias_initializer = None
                 bias_regularizer = None
 
             col7, col8 = st.columns(2)
-            kernel_regularizer = col7.selectbox('Kernel Regularizer', options.weight_regularizers, key=f'kernel_regularizer_{num_layer}')
-            activity_regularizer = col8.selectbox('Activity Regularizer', options.weight_regularizers, key=f'activity_regularizer_{num_layer}')
+            kernel_regularizer = col7.selectbox('Kernel Regularizer', weight_regularizers, key=f'kernel_regularizer_{num_layer}')
+            activity_regularizer = col8.selectbox('Activity Regularizer', weight_regularizers, key=f'activity_regularizer_{num_layer}')
 
             return {
                 'layer': 'Dense',
@@ -155,28 +243,28 @@ def create_infos(layer_type, num_layer, vocab_size, maxlen, init):
         
             col1, col2 = st.columns(2)
             units =  col1.number_input('Number of Units', step=1, key=f'units_{num_layer}')
-            activation = col2.selectbox('Activation Function', options.activation_functions, index=6, key=f'activation_{num_layer}')
+            activation = col2.selectbox('Activation Function', activation_functions, index=6, key=f'activation_{num_layer}')
 
             col3, col4 = st.columns(2)
             bias = col3.selectbox('Use Bias', (True, False), key=f'bias_{num_layer}')
-            kernel_initializer = col4.selectbox('Kernel Initializer', options.weight_initializers, index=6, key=f'kernel_initializer_{num_layer}')
+            kernel_initializer = col4.selectbox('Kernel Initializer', weight_initializers, index=6, key=f'kernel_initializer_{num_layer}')
 
             if bias:
                 col5, col6 = st.columns(2)
-                bias_initializer = col5.selectbox('Bias Initializer', options.weight_initializers, index=3, key=f'bias_initializer_{num_layer}')
-                bias_regularizer = col6.selectbox('Bias Regularizer', options.weight_regularizers, key=f'bias_regularizer_{num_layer}')
+                bias_initializer = col5.selectbox('Bias Initializer', weight_initializers, index=3, key=f'bias_initializer_{num_layer}')
+                bias_regularizer = col6.selectbox('Bias Regularizer', weight_regularizers, key=f'bias_regularizer_{num_layer}')
             else:
                 bias_initializer = None
                 bias_regularizer = None
 
             col7, col8 = st.columns(2)
-            recurrent_initializer = col7.selectbox('Recurrent Initializer', options.weight_initializers, index=10, key=f'recurrent_initializer_{num_layer}')
-            recurrent_regularizer = col8.selectbox('Recurrent Regularizer', options.weight_regularizers, key=f'recurrent_regularizer_{num_layer}')
+            kernel_regularizer = col7.selectbox('Kernel Regularizer', weight_regularizers, key=f'kernel_regularizer_{num_layer}')
+            activity_regularizer = col8.selectbox('Activity Regularizer', weight_regularizers, key=f'activity_regularizer_{num_layer}')
 
             col9, col10 = st.columns(2)
-            kernel_regularizer = col9.selectbox('Kernel Regularizer', options.weight_regularizers, key=f'kernel_regularizer_{num_layer}')
-            activity_regularizer = col10.selectbox('Activity Regularizer', options.weight_regularizers, key=f'activity_regularizer_{num_layer}')
-
+            recurrent_initializer = col9.selectbox('Recurrent Initializer', weight_initializers, index=9, key=f'recurrent_initializer_{num_layer}')
+            recurrent_regularizer = col10.selectbox('Recurrent Regularizer', weight_regularizers, key=f'recurrent_regularizer_{num_layer}')
+            
             col11, col12 = st.columns(2)
             dropout = col11.slider('Dropout', 0.0, 1.0, step=0.05, key=f'dropout_{num_layer}')
             recurrent_dropout = col12.slider('Recurrent Dropout', 0.0, 1.0, step=0.05, key=f'recurrent_dropout_{num_layer}')
@@ -185,9 +273,7 @@ def create_infos(layer_type, num_layer, vocab_size, maxlen, init):
             return_sequences = col13.selectbox('Return Sequences', (False, True), key=f'return_sequences_{num_layer}')
             return_state = col14.selectbox('Return State', (False, True), key=f'return_state_{num_layer}')
 
-            col15, col16 = st.columns(2)
-            go_backwards = col15.selectbox('Go Backwards', (False, True), key=f'go_backwards_{num_layer}')
-            stateful = col16.selectbox('Stateful', (False, True), key=f'stateful_{num_layer}')
+            go_backwards = st.selectbox('Go Backwards', (False, True), key=f'go_backwards_{num_layer}')
 
             return {
                 'layer': 'SimpleRNN',
@@ -210,7 +296,6 @@ def create_infos(layer_type, num_layer, vocab_size, maxlen, init):
                 'return_sequences': return_sequences,
                 'return_state': return_state,
                 'go_backwards': go_backwards,
-                'stateful': stateful,
                 'unroll': False,
             }
 
@@ -220,30 +305,30 @@ def create_infos(layer_type, num_layer, vocab_size, maxlen, init):
         
             col1, col2 = st.columns(2)
             units =  col1.number_input('Number of Units', step=1, key=f'units_{num_layer}')
-            activation = col2.selectbox('Activation Function', options.activation_functions, index=6, key=f'activation_{num_layer}')
+            activation = col2.selectbox('Activation Function', activation_functions, index=6, key=f'activation_{num_layer}')
 
             col3, col4 = st.columns(2)
-            recurrent_activation = col3.selectbox('Recurrent Activation Function', options.activation_functions, index=2, key=f'recurrent_activation_{num_layer}')
+            recurrent_activation = col3.selectbox('Recurrent Activation Function', activation_functions, index=2, key=f'recurrent_activation_{num_layer}')
             bias = col4.selectbox('Use Bias', (True, False), key=f'bias_{num_layer}')
 
             if bias:
                 col5, col6 = st.columns(2)
-                bias_initializer = col5.selectbox('Bias Initializer', options.weight_initializers, index=3, key=f'bias_initializer_{num_layer}')
-                bias_regularizer = col6.selectbox('Bias Regularizer', options.weight_regularizers, key=f'bias_regularizer_{num_layer}')
+                bias_initializer = col5.selectbox('Bias Initializer', weight_initializers, index=3, key=f'bias_initializer_{num_layer}')
+                bias_regularizer = col6.selectbox('Bias Regularizer', weight_regularizers, key=f'bias_regularizer_{num_layer}')
             else:
                 bias_initializer = None
                 bias_regularizer = None
             
             col7, col8 = st.columns(2)
-            kernel_initializer = col7.selectbox('Kernel Initializer', options.weight_initializers, index=6, key=f'kernel_initializer_{num_layer}')
-            recurrent_initializer = col8.selectbox('Recurrent Initializer', options.weight_initializers, index=10, key=f'recurrent_initializer_{num_layer}')
+            kernel_initializer = col7.selectbox('Kernel Initializer', weight_initializers, index=6, key=f'kernel_initializer_{num_layer}')
+            recurrent_initializer = col8.selectbox('Recurrent Initializer', weight_initializers, index=9, key=f'recurrent_initializer_{num_layer}')
 
             col9, col10 = st.columns(2)
-            kernel_regularizer = col9.selectbox('Kernel Regularizer', options.weight_regularizers, key=f'kernel_regularizer_{num_layer}')
-            recurrent_regularizer = col10.selectbox('Recurrent Regularizer', options.weight_regularizers, key=f'recurrent_regularizer_{num_layer}')
+            kernel_regularizer = col9.selectbox('Kernel Regularizer', weight_regularizers, key=f'kernel_regularizer_{num_layer}')
+            recurrent_regularizer = col10.selectbox('Recurrent Regularizer', weight_regularizers, key=f'recurrent_regularizer_{num_layer}')
 
             col11, col12 = st.columns(2)
-            activity_regularizer = col11.selectbox('Activity Regularizer', options.weight_regularizers, key=f'activity_regularizer_{num_layer}')
+            activity_regularizer = col11.selectbox('Activity Regularizer', weight_regularizers, key=f'activity_regularizer_{num_layer}')
             unit_forget_bias = col12.selectbox('Unit Forget Bias', (True, False), key=f'unit_forget_bias_{num_layer}')
 
             col13, col14 = st.columns(2)
@@ -254,9 +339,7 @@ def create_infos(layer_type, num_layer, vocab_size, maxlen, init):
             return_sequences = col15.selectbox('Return Sequences', (False, True), key=f'return_sequences_{num_layer}')
             return_state = col16.selectbox('Return State', (False, True), key=f'return_state_{num_layer}')
 
-            col17, col18 = st.columns(2)
-            go_backwards = col17.selectbox('Go Backwards', (False, True), key=f'go_backwards_{num_layer}')
-            stateful = col18.selectbox('Stateful', (False, True), key=f'stateful_{num_layer}')
+            go_backwards = st.selectbox('Go Backwards', (False, True), key=f'go_backwards_{num_layer}')
 
             return {
                 'layer': 'LSTM',
@@ -281,7 +364,6 @@ def create_infos(layer_type, num_layer, vocab_size, maxlen, init):
                 'return_sequences': return_sequences,
                 'return_state': return_state,
                 'go_backwards': go_backwards,
-                'stateful': stateful,
                 'time_major': False,
                 'unroll': False,
             }
@@ -295,30 +377,30 @@ def create_infos(layer_type, num_layer, vocab_size, maxlen, init):
                 units =  col1.number_input('Number of Units', step=1, value=128, key=f'units_{num_layer}')
             else:
                 units =  col1.number_input('Number of Units', step=1, key=f'units_{num_layer}')
-            activation = col2.selectbox('Activation Function', options.activation_functions, index=6, key=f'activation_{num_layer}')
+            activation = col2.selectbox('Activation Function', activation_functions, index=6, key=f'activation_{num_layer}')
 
             col3, col4 = st.columns(2)
-            recurrent_activation = col3.selectbox('Recurrent Activation Function', options.activation_functions, index=2, key=f'recurrent_activation_{num_layer}')
+            recurrent_activation = col3.selectbox('Recurrent Activation Function', activation_functions, index=2, key=f'recurrent_activation_{num_layer}')
             bias = col4.selectbox('Use Bias', (True, False), key=f'bias_{num_layer}')
 
             if bias:
                 col5, col6 = st.columns(2)
-                bias_initializer = col5.selectbox('Bias Initializer', options.weight_initializers, index=3, key=f'bias_initializer_{num_layer}')
-                bias_regularizer = col6.selectbox('Bias Regularizer', options.weight_regularizers, key=f'bias_regularizer_{num_layer}')
+                bias_initializer = col5.selectbox('Bias Initializer', weight_initializers, index=3, key=f'bias_initializer_{num_layer}')
+                bias_regularizer = col6.selectbox('Bias Regularizer', weight_regularizers, key=f'bias_regularizer_{num_layer}')
             else:
                 bias_initializer = None
                 bias_regularizer = None
 
             col7, col8 = st.columns(2)
-            kernel_initializer = col7.selectbox('Kernel Initializer', options.weight_initializers, index=6, key=f'kernel_initializer_{num_layer}')
-            recurrent_initializer = col8.selectbox('Recurrent Initializer', options.weight_initializers, index=10, key=f'recurrent_initializer_{num_layer}')
+            kernel_initializer = col7.selectbox('Kernel Initializer', weight_initializers, index=6, key=f'kernel_initializer_{num_layer}')
+            recurrent_initializer = col8.selectbox('Recurrent Initializer', weight_initializers, index=9, key=f'recurrent_initializer_{num_layer}')
 
             col9, col10 = st.columns(2)
-            kernel_regularizer = col9.selectbox('Kernel Regularizer', options.weight_regularizers, key=f'kernel_regularizer_{num_layer}')
-            recurrent_regularizer = col10.selectbox('Recurrent Regularizer', options.weight_regularizers, key=f'recurrent_regularizer_{num_layer}')
+            kernel_regularizer = col9.selectbox('Kernel Regularizer', weight_regularizers, key=f'kernel_regularizer_{num_layer}')
+            recurrent_regularizer = col10.selectbox('Recurrent Regularizer', weight_regularizers, key=f'recurrent_regularizer_{num_layer}')
 
             col11, col12 = st.columns(2)
-            activity_regularizer = col11.selectbox('Activity Regularizer', options.weight_regularizers, key=f'activity_regularizer_{num_layer}')
+            activity_regularizer = col11.selectbox('Activity Regularizer', weight_regularizers, key=f'activity_regularizer_{num_layer}')
             reset_after = col12.selectbox('Reset After', (True, False), key=f'reset_after_{num_layer}')
 
             col13, col14 = st.columns(2)
@@ -332,9 +414,7 @@ def create_infos(layer_type, num_layer, vocab_size, maxlen, init):
                 return_sequences = col15.selectbox('Return Sequences', (False, True), key=f'return_sequences_{num_layer}')
             return_state = col16.selectbox('Return State', (False, True), key=f'return_state_{num_layer}')
 
-            col17, col18 = st.columns(2)
-            go_backwards = col17.selectbox('Go Backwards', (False, True), key=f'go_backwards_{num_layer}')
-            stateful = col18.selectbox('Stateful', (False, True), key=f'stateful_{num_layer}')
+            go_backwards = st.selectbox('Go Backwards', (False, True), key=f'go_backwards_{num_layer}')
 
             return {
                 'layer': 'GRU',
@@ -358,16 +438,23 @@ def create_infos(layer_type, num_layer, vocab_size, maxlen, init):
                 'return_sequences': return_sequences,
                 'return_state': return_state,
                 'go_backwards': go_backwards,
-                'stateful': stateful,
                 'unroll': False,
                 'time_major': False,
                 'reset_after': reset_after,
             }
 
     def pretrained_embedding_params(num_layer, vocab_size, maxlen, init):
-        with st.expander('Hyperparameters'):
-            handle = st.selectbox('Select Text Embedding', options.text_embeddings, key=f'url_{num_layer}')
-            st.warning(messages.PRETRAINED_WARNING)
+        text_embeddings = [
+            'https://tfhub.dev/google/nnlm-en-dim50/2',
+            'https://tfhub.dev/google/nnlm-en-dim50-with-normalization/2',
+            'https://tfhub.dev/google/nnlm-en-dim128/2',
+            'https://tfhub.dev/google/nnlm-de-dim50/2',
+            'https://tfhub.dev/google/nnlm-de-dim128/2',
+                ]
+        with st.expander('Hyperparameters'):             
+            handle = st.selectbox('Select Text Embedding', text_embeddings, key=f'url_{num_layer}')
+            PRETRAINED_WARNING = "When using this layer, **avoid using the Input Object** to prevent a shape mismatch as this layer expects a tensor shape of **(None,)**."
+            st.warning(PRETRAINED_WARNING)
 
             return {
                 'layer': 'KerasLayer',
@@ -388,7 +475,8 @@ def create_infos(layer_type, num_layer, vocab_size, maxlen, init):
     def tp_embedding_params(num_layer, vocab_size, maxlen, init):
         with st.expander('Hyperparameters'):
             embed_dim = st.number_input('Embedding Dimensions', step=1, value=32, key=f'embed_dim_{num_layer}')
-            st.warning(messages.LAYER_WARNING)
+            LAYER_WARNING = "Please note that this layer was specifically implemented for use with transformer blocks. It may not be suitable for use in other types of neural networks."
+            st.warning(LAYER_WARNING)
             return {
                 'layer': 'TokenAndPositionEmbedding',
                 'maxlen': maxlen,
@@ -415,11 +503,13 @@ def create_infos(layer_type, num_layer, vocab_size, maxlen, init):
             }
 
     def input_params(num_layer, vocab_size, maxlen, init):
-        st.info(messages.INPUT_OBJECT_INFO)
+        INPUT_OBJECT_INFO = "Defines an input placeholder with a shape of **(maxlen,)**, where maxlen represents the maximum length of the input sequence that will be fed into the network during training or inference."
+        st.info(INPUT_OBJECT_INFO)
         return {'layer': 'Input', 'shape': (maxlen,)}
     
     def global_avg_pooling_1d_params(num_layer, vocab_size, maxlen, init):
-        st.info(messages.POOLING_INFO)
+        POOLING_INFO = "Computes the average of the feature maps in the time dimension (i.e., along the length of each sequence) of a 1D input tensor, which results in a **single output value per feature map**."
+        st.info(POOLING_INFO)
         return {'layer': 'GlobalAveragePooling1D', 'data_format': 'channels_last'}
     
     layer_param_funcs = {
@@ -579,7 +669,12 @@ def plot_roc_curve(fpr, tpr, roc_auc):
 ######################
 
 def inf_preprocessing(tokenizer, maxlen, text):
-    text = preprocess([text])
-    text = tokenizer.texts_to_sequences(text)
-    text = keras.preprocessing.sequence.pad_sequences(text, maxlen=maxlen)
-    return text
+    text_series = pd.Series([text])
+    text_series = text_series.replace("<br\\s*/?>", " ", regex=True)
+    text_series = text_series.apply(lambda x: re.sub(r"[^a-zA-ZäöüÄÖÜß']", " ", x))
+    text_series = text_series.apply(lambda x: re.sub(r"\s+", " ", x))
+    text_series = text_series.apply(lambda x: x.lower())
+    text_series = text_series.apply(lambda x: x.strip())
+    text_series = tokenizer.texts_to_sequences(text_series)
+    text_series = keras.preprocessing.sequence.pad_sequences(text_series, maxlen=maxlen)
+    return text_series
