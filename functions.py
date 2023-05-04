@@ -8,40 +8,23 @@ import numpy as np
 import pandas as pd
 import io
 import re
+import custom_layers
 
 from sklearn import metrics
 from collections import Counter
 from tensorflow import keras
+from keras.models import Sequential
+from keras.layers import Input
+from keras.layers import Dense
+from keras.layers import Embedding
+from keras.layers import SimpleRNN
+from keras.layers import LSTM
+from keras.layers import GRU
+from keras.layers import Bidirectional
+from keras.layers import Dropout
+from keras.layers import GlobalAveragePooling1D
+from tensorflow_hub import KerasLayer
 
-activation_functions = [
-    None,
-    "relu",
-    "sigmoid",
-    "softmax",
-    "softplus",
-    "softsign",
-    "tanh",
-    "selu",
-    "elu",
-    ]
-weight_initializers = [
-    'random_normal',
-    'random_uniform',
-    'truncated_normal',
-    'zeros',
-    'ones',
-    'glorot_normal',
-    'glorot_uniform',
-    'he_normal',
-    'he_uniform',
-    'orthogonal'
-    ]
-weight_regularizers = [
-    None,
-    'l1',
-    'l2',
-    'l1_l2'
-    ]
 
 ######################
 # Upload Dataset
@@ -92,6 +75,13 @@ def display_df_checkboxes(df):
     if col2.checkbox(TXT_RAW_DATA, value=False, key=st.session_state['key']):
         st.dataframe(df)
 
+def display_labels(df, column_y):
+    labels = df[column_y].unique()
+    col1, col2 = st.columns(2)
+    pos_label = col1.selectbox('Positive Label', labels, index=0)
+    neg_label = col2.selectbox('Negative Label', labels, index=1)
+    return pos_label, neg_label
+
 def display_preprocess_options(df):
     COLUMNS_WARNING = "Please ensure that you select only one column for the input text and one column for the labels. Using multiple columns for either the input text or the labels may result in errors or unexpected behavior in your analysis or model."
     columns = list(df.columns.values)
@@ -101,14 +91,23 @@ def display_preprocess_options(df):
     column_y = col2.selectbox('Select Label Column', columns, index=1)
     if column_X==column_y: st.error(COLUMNS_WARNING)
 
+    labels = df[column_y].unique()
+    col3, col4 = st.columns(2)
+    pos_label = col3.selectbox('Positive Label', labels, index=0)
+    neg_label = col4.selectbox('Negative Label', labels, index=1)
+    
     test_train_split = st.slider('Test Train Split', 0.1, 0.9, step=0.1, value=(0.5))
 
-    col3, col4 = st.columns(2)
-    maxlen = col3.number_input('Max Sequence Length (Words)', min_value=1, value=100)
-    vocab_size = col4.number_input('Vocabulary Size (Words)', step=1, value=10000)
+    col5, col6 = st.columns(2)
+    maxlen = col5.number_input('Max Sequence Length (Words)', min_value=1, value=100)
+    vocab_size = col6.number_input('Vocabulary Size (Words)', step=1, value=10000)
     
-    return column_X, column_y, test_train_split, maxlen, vocab_size
+    return column_X, column_y, pos_label, neg_label, test_train_split, maxlen, vocab_size
 
+def encode_labels(dataset, column_y, pos_label, neg_label):
+    mapping = {neg_label: 0, pos_label: 1}
+    dataset[column_y] = dataset[column_y].map(mapping)
+    return dataset
 
 def preprocess(data, column_X):
     # regex
@@ -126,12 +125,6 @@ def preprocess(data, column_X):
     data = data.sample(frac=1)
     data.reset_index(drop=True, inplace=True)
     return data
-
-def encode_labels(dataset, column_y):
-    labels = dataset[column_y].value_counts()
-    mapping = {labels.index[1]: 0, labels.index[0]: 1}
-    dataset[column_y] = dataset[column_y].map(mapping)
-    return dataset
 
 def split_dataset(df, test_train_split):
     train_len = round(len(df) * test_train_split)
@@ -163,6 +156,76 @@ def transform_texts(tokenizer, maxlen, X_train, X_val, X_test):
 # Build Model
 ######################
 
+activation_functions = [
+    None,
+    "relu",
+    "sigmoid",
+    "softmax",
+    "softplus",
+    "softsign",
+    "tanh",
+    "selu",
+    "elu",
+    ]
+
+weight_initializers = [
+    'random_normal',
+    'random_uniform',
+    'truncated_normal',
+    'zeros',
+    'ones',
+    'glorot_normal',
+    'glorot_uniform',
+    'he_normal',
+    'he_uniform',
+    'orthogonal'
+    ]
+
+weight_regularizers = [
+    None,
+    'l1',
+    'l2',
+    'l1_l2'
+    ]
+
+# indices for default layers
+default_index_dict = {
+    1: 7,
+    2: 1,
+    3: 4,
+    4: 4,
+    5: 0,
+    }
+
+layer_options = [
+    'Dense Layer',
+    'Embedding Layer',
+    'Simple Recurrent Neural Network Layer',
+    'Long Short-Term Memory Layer',
+    'Gated Recurrent Unit Layer',
+    'Pretrained Embedding Layer',
+    'Dropout Layer',
+    'Input Object',
+    'Global Average Pooling 1D Layer',
+    'Token And Position Embedding Layer',
+    'Transformer Block',
+    ]
+
+layer_dict = {
+    'Input': Input,
+    'Dense': Dense,
+    'Embedding': Embedding,
+    'SimpleRNN': SimpleRNN,
+    'LSTM': LSTM,
+    'GRU': GRU,
+    'KerasLayer': KerasLayer,
+    'Dropout': Dropout,
+    'GlobalAveragePooling1D': GlobalAveragePooling1D,
+    'TokenAndPositionEmbedding': custom_layers.TokenAndPositionEmbedding,
+    'TransformerBlock': custom_layers.TransformerBlock,
+    }
+
+
 def create_buttons(max_layers):
     col1, col2, col3 = st.columns([.055,.05,1])
     if col1.button('+') and len(st.session_state.model_layers) <= max_layers:
@@ -173,6 +236,66 @@ def create_buttons(max_layers):
     if col3.button('Remove All') and len(st.session_state.model_layers) > 0:
         st.session_state.model_layers = []
         st.session_state.info_dict = {}
+
+def add_layer():
+    vocab_size = st.session_state.vocab_size
+    maxlen = st.session_state.maxlen
+
+    for i, layer in enumerate(st.session_state.model_layers):
+        layer_number = i + 1
+        # default layer adding
+        if st.session_state.model_layers[i] == 'Default_Layer':
+            index = default_index_dict.get(layer_number, None)
+            model_layer = st.selectbox(
+                f'Select Layer {layer_number}',
+                layer_options,
+                index=index,
+                key=f'layer_{layer_number}'
+                )
+            infos = create_infos(model_layer, layer_number, vocab_size, maxlen, init=True)
+        # normal layer adding
+        else:
+            model_layer = st.selectbox(
+                f'Select Layer {layer_number}',
+                layer_options,
+                index=0,
+                key=f'layer_{layer_number}'
+                )
+            infos = create_infos(model_layer, layer_number, vocab_size, maxlen, init=False)
+
+        # Flag to use raw dataset instead of preprocessed dataset
+        if infos['layer'] == 'KerasLayer':
+            st.session_state.use_txt = True
+
+        # Update session
+        st.session_state.info_dict[layer_number] = infos
+
+def build_model():
+    if len(st.session_state.info_dict) and not st.session_state.model_built:
+        if st.button('Build Model'):
+            st.session_state.model = Sequential()
+            info_dict = st.session_state.info_dict
+            for layer in info_dict:
+                layer_type = info_dict[layer]['layer']
+                layer_class = layer_dict[layer_type]
+                hyper_params = {
+                    # extracts the hyperparams from the info_dict
+                    k: v for i, (k, v) in enumerate(info_dict[layer].items())
+                    if i != 0 and k != 'bidirectional'
+                    }
+                # Decides if bidirectional wrapper should be added
+                if info_dict[layer].get('bidirectional', False):
+                    st.session_state.model.add(Bidirectional(layer_class(**hyper_params)))
+                else:
+                    st.session_state.model.add(layer_class(**hyper_params))
+
+            st.session_state.info_dict = info_dict
+            st.session_state.model_built = True
+    elif len(st.session_state.info_dict) and st.session_state.model_built:
+        pass
+    else:
+        NUM_LAYER_WARNING = "You must add at least one layer to the model before you can build it!"
+        st.warning(NUM_LAYER_WARNING)
 
 def create_infos(layer_type, num_layer, vocab_size, maxlen, init):
     def dense_params(num_layer, vocab_size, maxlen, init):
@@ -529,11 +652,92 @@ def create_infos(layer_type, num_layer, vocab_size, maxlen, init):
     if layer_type in layer_param_funcs:
         return layer_param_funcs[layer_type](num_layer, vocab_size, maxlen, init)
 
+######################
+# Compile Model
+######################
+
+optimizers = [
+    'SGD',
+    'RMSprop',
+    'Adagrad',
+    'Adadelta',
+    'Adam',
+    'Adamax',
+    'Nadam',
+    ]
+
+optimizer_dict = {
+    'SGD': tf.keras.optimizers.SGD,
+    'RMSprop': tf.keras.optimizers.RMSprop,
+    'Adagrad': tf.keras.optimizers.Adagrad,
+    'Adadelta': tf.keras.optimizers.Adadelta,
+    'Adam': tf.keras.optimizers.Adam,
+    'Adamax': tf.keras.optimizers.Adamax,
+    'Nadam': tf.keras.optimizers.Nadam,
+}
+
+loss_functions = [
+    'mean_squared_error',
+    'mean_absolute_error',
+    'mean_squared_logarithmic_error',
+    'binary_crossentropy',
+    'hinge',
+    'squared_hinge',
+    ]
+
+
+def display_optimizer():
+    col1, col2 = st.columns(2)
+    select_optimizer = col1.selectbox('Optimizer', optimizers, index=4)
+    default_lr = 0.01 if select_optimizer == 'SGD' else 0.001
+    learning_rate = col2.number_input(
+        label='Learning Rate',
+        min_value=1e-7,
+        step=0.001,
+        max_value=1.0,
+        value=default_lr,
+        format="%f",
+        )
+    optimizer = optimizer_dict[select_optimizer](lr=learning_rate)
+    return optimizer
+
+def display_loss_function():
+    loss_function = st.selectbox('Loss Function', loss_functions, index=3)
+    return loss_function
+
+def print_model_summary():
+    if st.session_state.model_compiled:
+        with st.expander('Summary'):
+            st.session_state.model.summary(
+                line_length=79,
+                print_fn=lambda x: st.text(x)
+                )
+        SUCCESS_COMPILE = "The model was compiled successfully!"    
+        st.success(SUCCESS_COMPILE)
 
 
 ######################
 # Train Model
 ######################
+
+callback_options = [
+    'EarlyStopping',
+    'ReduceLROnPlateau',
+    ]
+
+cb_dict = {
+    'EarlyStopping': tf.keras.callbacks.EarlyStopping,
+    'ReduceLROnPlateau': tf.keras.callbacks.ReduceLROnPlateau,
+    }
+
+
+def get_datasets():
+    # Choose the correct train and val set
+    X_train = np.array(st.session_state.X_train_txt) \
+        if st.session_state.use_txt else st.session_state.X_train_int
+    X_val = np.array(st.session_state.X_val_txt) \
+        if st.session_state.use_txt else st.session_state.X_val_int
+    return X_train, X_val
 
 def create_cb_options(name):
     callback_map = {
@@ -541,6 +745,11 @@ def create_cb_options(name):
         'ReduceLROnPlateau': create_reduce_lr_on_plateau
     }
     return callback_map[name]()
+
+def configure_callbacks():
+    cb_select = st.multiselect('Select Callbacks', callback_options)
+    cb_options = {callback: create_cb_options(callback) for callback in cb_select}
+    return [cb_dict[cb](**cb_options[cb]) for cb in cb_options]
 
 def create_early_stopping():
     with st.expander('EarlyStopping Options'):
@@ -595,6 +804,13 @@ def create_reduce_lr_on_plateau():
 ######################
 # Evaluate Model
 ######################
+
+def get_test_set():
+    if st.session_state.use_txt:
+        X_test = np.array(st.session_state.X_test_txt)
+    else:
+        X_test = st.session_state.X_test_int
+    return X_test
 
 def acc_loss_over_time():
     history_dict = st.session_state['history'].history
@@ -663,6 +879,18 @@ def plot_roc_curve(fpr, tpr, roc_auc):
     ax.legend(loc="lower right")
     return fig
 
+def display_figures():
+    SUCCESS_EVALUATE = "The model was evaluated successfully!"
+    PERFORMANCE_METRICS = "**Model Performance Metrics on the Test Dataset**"
+    st.success(SUCCESS_EVALUATE)
+    st.write(PERFORMANCE_METRICS)
+    st.write(st.session_state.scores_df)
+    with st.expander('Accuracy and Loss over time'):
+        st.pyplot(st.session_state.fig_acc_loss)
+    with st.expander('Confusion Matrix'):
+        st.pyplot(st.session_state.fig_cm)
+    with st.expander('Receiver Operating Characteristic (ROC)'):
+        st.pyplot(st.session_state.fig_roc)
 
 ######################
 # Inference

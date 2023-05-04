@@ -7,21 +7,11 @@ import numpy as np
 import tensorflow as tf
 
 import functions as fnc
-import custom_layers
 import callbacks
 
 from sklearn.metrics import roc_curve, auc
-from keras.models import Sequential
-from keras.layers import Input
-from keras.layers import Dense
-from keras.layers import Embedding
-from keras.layers import SimpleRNN
-from keras.layers import LSTM
-from keras.layers import GRU
-from keras.layers import Bidirectional
-from keras.layers import Dropout
-from keras.layers import GlobalAveragePooling1D
-from tensorflow_hub import KerasLayer
+
+
 
 
 ######################
@@ -150,15 +140,15 @@ if st.session_state.df is not None:
     During preprocessing, all **punctuation** is removed, words are converted to **lowercase**, and **split by spaces**. The words are then **indexed by frequency**, with low integers representing frequent words. Additionally, there are three special tokens: **0** represents padding, **1** represents the start-of-sequence (SOS) token, and **2** represents unknown words.
     """
     st.write(PREPROCESSING_INFO)
+    
     df = st.session_state.df
-    
     fnc.display_df_checkboxes(df)
-    column_X, column_y, test_train_split, maxlen, vocab_size = fnc.display_preprocess_options(df)
-    
+    column_X, column_y, pos_label, neg_label, test_train_split, maxlen, vocab_size = fnc.display_preprocess_options(df)
+
     # Preprocess the datasets
     if st.button('Start Preprocessing'):
         # encode labels and split df
-        df = fnc.encode_labels(df, column_y)
+        df = fnc.encode_labels(df, column_y, pos_label, neg_label)
         # preoprocess data
         df = fnc.preprocess(df, column_X)
         # split data
@@ -219,109 +209,16 @@ if st.session_state.X_train_int is not None:
     st.session_state.setdefault("model_layers", ["Default_Layer"]*5)
     st.session_state.setdefault("info_dict", {})
 
-    # Arrays and dictionaries
-    layer_options = [
-        'Dense Layer',
-        'Embedding Layer',
-        'Simple Recurrent Neural Network Layer',
-        'Long Short-Term Memory Layer',
-        'Gated Recurrent Unit Layer',
-        'Pretrained Embedding Layer',
-        'Dropout Layer',
-        'Input Object',
-        'Global Average Pooling 1D Layer',
-        'Token And Position Embedding Layer',
-        'Transformer Block',
-        ]
-    layer_dict = {
-        'Input': Input,
-        'Dense': Dense,
-        'Embedding': Embedding,
-        'SimpleRNN': SimpleRNN,
-        'LSTM': LSTM,
-        'GRU': GRU,
-        'KerasLayer': KerasLayer,
-        'Dropout': Dropout,
-        'GlobalAveragePooling1D': GlobalAveragePooling1D,
-        'TokenAndPositionEmbedding': custom_layers.TokenAndPositionEmbedding,
-        'TransformerBlock': custom_layers.TransformerBlock,
-        }
-    default_index_dict = {
-        1: 7,
-        2: 1,
-        3: 4,
-        4: 4,
-        5: 0,
-        }
-
     MAX_LAYERS = 20
     fnc.create_buttons(MAX_LAYERS)
+    fnc.add_layer()
+    fnc.build_model()
 
-    # Add layers and hyperparameters
-    vocab_size = st.session_state.vocab_size
-    maxlen = st.session_state.maxlen
-    for i, layer in enumerate(st.session_state.model_layers):
-        layer_number = i + 1
-        # default layer adding
-        if st.session_state.model_layers[i] == 'Default_Layer':
-            index = default_index_dict.get(layer_number, None)
-            model_layer = st.selectbox(
-                f'Select Layer {layer_number}',
-                layer_options,
-                index=index,
-                key=f'layer_{layer_number}'
-                )
-            infos = fnc.create_infos(model_layer, layer_number, vocab_size, maxlen, init=True)
-        # normal layer adding
-        else:
-            model_layer = st.selectbox(
-                f'Select Layer {layer_number}',
-                layer_options,
-                index=0,
-                key=f'layer_{layer_number}'
-                )
-            infos = fnc.create_infos(model_layer, layer_number, vocab_size, maxlen, init=False)
-        
-        # Flag to use raw dataset instead of preprocessed dataset
-        if infos['layer'] == 'KerasLayer':
-            st.session_state.use_txt = True
-
-        # Update session
-        st.session_state.info_dict[layer_number] = infos
-
-    # Build sequential model
-    if len(st.session_state.info_dict) and not st.session_state.model_built:
-        if st.button('Build Model'):
-            st.session_state.model = Sequential()
-            info_dict = st.session_state.info_dict
-            for layer in info_dict:
-                layer_type = info_dict[layer]['layer']
-                layer_class = layer_dict[layer_type]
-                hyper_params = {
-                    # extracts the hyperparams from the info_dict
-                    k: v for i, (k, v) in enumerate(info_dict[layer].items())
-                    if i != 0 and k != 'bidirectional'
-                    }
-                # Decides if bidirectional wrapper should be added
-                if info_dict[layer].get('bidirectional', False):
-                    st.session_state.model.add(Bidirectional(layer_class(**hyper_params)))
-                else:
-                    st.session_state.model.add(layer_class(**hyper_params))
-
-            st.session_state.info_dict = info_dict
-            st.session_state.model_built = True
-    elif len(st.session_state.info_dict) and st.session_state.model_built:
-        pass
-    else:
-        NUM_LAYER_WARNING = "You must add at least one layer to the model before you can build it!"
-        st.warning(NUM_LAYER_WARNING)
-     
     if st.session_state.model_built:
         SUCCESS_BUILD = "The model was built successfully!"
         st.success(SUCCESS_BUILD)
-    
-    st.write("""***""")
 
+    st.write("""***""")
 
 ######################
 # Compile Model
@@ -335,57 +232,10 @@ if st.session_state.model_built:
     Different combinations of optimizers, loss functions, and metrics can have a significant impact on the performance of the model, so it's important to **choose these hyperparameters carefully** and optimize them for the specific task at hand.
     """
     st.write(COMPILE_INFO)
-    col1, col2 = st.columns(2)
     
-    # Optimizer and lr
-    optimizers = [
-        'SGD',
-        'RMSprop',
-        'Adagrad',
-        'Adadelta',
-        'Adam',
-        'Adamax',
-        'Nadam',
-    ]
-    optimizer_dict = {
-        'SGD': tf.keras.optimizers.SGD,
-        'RMSprop': tf.keras.optimizers.RMSprop,
-        'Adagrad': tf.keras.optimizers.Adagrad,
-        'Adadelta': tf.keras.optimizers.Adadelta,
-        'Adam': tf.keras.optimizers.Adam,
-        'Adamax': tf.keras.optimizers.Adamax,
-        'Nadam': tf.keras.optimizers.Nadam,
-    }
-
-    select_optimizer = col1.selectbox('Optimizer', optimizers, index=4)
-    default_lr = 0.01 if select_optimizer == 'SGD' else 0.001
-    learning_rate = col2.number_input(
-        label='Learning Rate',
-        min_value=1e-7,
-        step=0.001,
-        max_value=1.0,
-        value=default_lr,
-        format="%f",
-        )
-    optimizer = optimizer_dict[select_optimizer](lr=learning_rate)
-
-    # Loss function
-    loss_functions = [
-        'mean_squared_error',
-        'mean_absolute_error',
-        'mean_absolute_percentage_error',
-        'mean_squared_logarithmic_error',
-        'categorical_crossentropy',
-        'sparse_categorical_crossentropy',
-        'binary_crossentropy',
-        'hinge',
-        'squared_hinge',
-        'cosine_similarity',
-        'poisson',
-        'kullback_leibler_divergence',
-    ]
-    loss_function = st.selectbox('Loss Function', loss_functions, index=6)
-
+    optimizer = fnc.display_optimizer()
+    loss_function = fnc.display_loss_function()
+    
     # Compile the model
     if st.button('Compile Model'):
         st.session_state.model.compile(
@@ -395,15 +245,7 @@ if st.session_state.model_built:
             )
         st.session_state.model_compiled = True
 
-    # Print model summary
-    if st.session_state.model_compiled:
-        with st.expander('Summary'):
-            st.session_state.model.summary(
-                line_length=79,
-                print_fn=lambda x: st.text(x)
-                )
-        SUCCESS_COMPILE = "The model was compiled successfully!"    
-        st.success(SUCCESS_COMPILE)
+    fnc.print_model_summary()
 
     st.write("""***""")
 
@@ -419,31 +261,14 @@ if st.session_state.model_compiled:
 
     During each epoch, the model is fed the entire training dataset, and the weights and biases of the model are adjusted to **minimize the loss function**. Typically, **multiple epochs are needed** to achieve good performance on the training dataset, but too many epochs can lead to overfitting, where the model performs well on the training data but poorly on new, unseen data.
     """
-
     st.write(TRAINING_INFO)
 
-    # Choose the correct train and val set
-    X_train = np.array(st.session_state.X_train_txt) \
-        if st.session_state.use_txt else st.session_state.X_train_int
-    X_val = np.array(st.session_state.X_val_txt) \
-        if st.session_state.use_txt else st.session_state.X_val_int
+    X_train, X_val = fnc.get_datasets()
 
     num_epochs = st.number_input('Epochs', min_value=1, step=1)
-    
     num_steps = round(len(X_train) / 32)
 
-    # Select and configure callbacks
-    callback_options = [
-        'EarlyStopping',
-        'ReduceLROnPlateau',
-        ]
-    cb_select = st.multiselect('Select Callbacks', callback_options)
-    cb_options = {callback: fnc.create_cb_options(callback) for callback in cb_select}
-    cb_dict = {
-        'EarlyStopping': tf.keras.callbacks.EarlyStopping,
-        'ReduceLROnPlateau': tf.keras.callbacks.ReduceLROnPlateau,
-    }
-    my_callbacks = [cb_dict[cb](**cb_options[cb]) for cb in cb_options]
+    my_callbacks = fnc.configure_callbacks()
 
     # Train the model
     if st.button('Train Model'):
@@ -480,25 +305,12 @@ if st.session_state.history:
     if st.button('Evaluate Model'):
         model = st.session_state.model
         y_test = st.session_state.y_test
-
-        # Choose the correct test set
-        if st.session_state.use_txt:
-            X_test = np.array(st.session_state.X_test_txt)
-        else:
-            X_test = st.session_state.X_test_int
+        X_test = fnc.get_test_set()
         
         # Predict ŷ on test set and evaluate with y
         pred_test = (model.predict(X_test) > 0.5).astype("int32")
-        accuracy, precision, recall, f1 = fnc.get_metrics(
-            y_test,
-            pred_test.flatten()
-            )
-        scores = {
-            'Accuracy': accuracy,
-            'Precision': precision,
-            'Recall': recall,
-            'F1 Score': f1
-            }
+        accuracy, precision, recall, f1 = fnc.get_metrics(y_test, pred_test.flatten())
+        scores = {'Accuracy': accuracy, 'Precision': precision, 'Recall': recall, 'F1 Score': f1}
         
         # Create dataframe
         scores_df = pd.DataFrame(scores, index=[0]).rename(index={0: 'Score'})
@@ -512,27 +324,12 @@ if st.session_state.history:
         fig_roc = fnc.plot_roc_curve(fpr, tpr, roc_auc)
 
         # Update sessions
-        data_dict = {
-        'fig_acc_loss': fig_acc_loss,
-        'scores_df': scores_df,
-        'fig_cm': fig_cm,
-        'fig_roc': fig_roc,
-        }
+        data_dict = {'fig_acc_loss': fig_acc_loss, 'scores_df': scores_df, 'fig_cm': fig_cm, 'fig_roc': fig_roc}
         st.session_state.update(data_dict)
         
         # Display dataframe and figures
         if st.session_state.fig_acc_loss:
-            SUCCESS_EVALUATE = "The model was evaluated successfully!"
-            PERFORMANCE_METRICS = "**Model Performance Metrics on the Test Dataset**"
-            st.success(SUCCESS_EVALUATE)
-            st.write(PERFORMANCE_METRICS)
-            st.write(st.session_state.scores_df)
-            with st.expander('Accuracy and Loss over time'):
-                st.pyplot(st.session_state.fig_acc_loss)
-            with st.expander('Confusion Matrix'):
-                st.pyplot(st.session_state.fig_cm)
-            with st.expander('Receiver Operating Characteristic (ROC)'):
-                st.pyplot(st.session_state.fig_roc)
+            fnc.display_figures()
         
         st.write("""***""")
 
@@ -559,11 +356,10 @@ if st.session_state.history:
         else:
             text = tf.expand_dims(text, 0)
             text = tf.data.Dataset.from_tensor_slices(text).batch(1)
-        result = st.session_state.model.predict(text)
-        percentage = round(result[0][0] * 100)
-        result_str = f"""
-        There is a **{percentage}%** chance that your text has a positive sentiment.
-        """
-        st.info(result_str)
+        result = st.session_state.model.predict(text) > 0.5
+        
+        sentiment_string = "The sentiment of the sentence is positive." if result[0][0] else "The sentiment of the sentence is negative."
+        
+        st.info(sentiment_string)
 
 
