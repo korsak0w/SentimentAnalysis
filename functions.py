@@ -27,6 +27,27 @@ from tensorflow_hub import KerasLayer
 
 
 ######################
+# General Functions
+######################
+
+def reset_session_states(stage):
+    if stage == "prep":
+        st.session_state.model = None
+        st.session_state.model_built = False
+        st.session_state.model_compiled = False
+        st.session_state.history = None
+        st.session_state.pred_test = None
+    elif stage == "build":
+        st.session_state.model_compiled = False
+        st.session_state.history = None
+        st.session_state.pred_test = None
+    elif stage == "compile":
+        st.session_state.history = None
+        st.session_state.pred_test = None
+    elif stage == "train":
+        st.session_state.pred_test = None
+
+######################
 # Upload Dataset
 ######################
 
@@ -135,7 +156,7 @@ def split_dataset(df, test_train_split):
     val_set = splitted[:val_length]
     return train_set, val_set, test_set
 
-def seperate_columns(df, col_X, col_y):
+def separate_columns(df, col_X, col_y):
     X = np.asarray(df[col_X].reset_index(drop=True))
     y = np.asarray(df[col_y].reset_index(drop=True))
     return X, y
@@ -271,8 +292,12 @@ def add_layer():
         st.session_state.info_dict[layer_number] = infos
 
 def build_model():
-    if len(st.session_state.info_dict) and not st.session_state.model_built:
+    
+    # ! delete model_built
+    # ! reset session_states: model_compiled, history, pred_test
+    if len(st.session_state.info_dict):
         if st.button('Build Model'):
+            reset_session_states('build')
             st.session_state.model = Sequential()
             info_dict = st.session_state.info_dict
             for layer in info_dict:
@@ -291,8 +316,7 @@ def build_model():
 
             st.session_state.info_dict = info_dict
             st.session_state.model_built = True
-    elif len(st.session_state.info_dict) and st.session_state.model_built:
-        pass
+
     else:
         NUM_LAYER_WARNING = "You must add at least one layer to the model before you can build it!"
         st.warning(NUM_LAYER_WARNING)
@@ -811,6 +835,25 @@ def get_test_set():
     else:
         X_test = st.session_state.X_test_int
     return X_test
+
+def get_predictions(model, X_test):
+    predictions = []
+    progress_bar = st.progress(0)
+    batch_size = 100
+
+    for i in range(0, len(X_test), batch_size):
+        batch = X_test[i:i + batch_size]
+        batch_preds = model.predict(batch)
+        batch_preds = (batch_preds > 0.5).astype("int32")
+        predictions.extend(batch_preds)
+
+        # update progress bar
+        progress = (i + len(batch)) / len(X_test)
+        progress_bar.progress(progress)
+    
+    # Flatten predictions into a single array
+    return np.concatenate(predictions)
+
 
 def acc_loss_over_time():
     history_dict = st.session_state['history'].history

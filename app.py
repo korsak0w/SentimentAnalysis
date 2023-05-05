@@ -28,6 +28,7 @@ st.write(APP_INFO)
 ######################
 # Session States
 ######################
+
 states = [
     # Upload Dataset
     'df',
@@ -61,6 +62,7 @@ states = [
     'history',
 
     # Evaluate
+    'pred_test',
     'fig_acc_loss',
     'scores_df',
     'fig_cm',
@@ -80,7 +82,7 @@ for state in states:
 
 def in_wid_change():
     for state in states:
-        st.session_state[state]= None 
+        st.session_state[state] = None 
 
 ######################
 # Data upload
@@ -147,22 +149,34 @@ if st.session_state.df is not None:
 
     # Preprocess the datasets
     if st.button('Start Preprocessing'):
-        # encode labels and split df
+        fnc.reset_session_states('prep')
+        preprocess_bar = st.progress(0)
+        
+        # encode labels
+        preprocess_bar.progress(10)
         df = fnc.encode_labels(df, column_y, pos_label, neg_label)
+
         # preoprocess data
+        preprocess_bar.progress(20)
         df = fnc.preprocess(df, column_X)
+
         # split data
+        preprocess_bar.progress(30)
         train_set, val_set, test_set = fnc.split_dataset(df, test_train_split)
-        # seperate labes from text
-        X_train_txt, y_train = fnc.seperate_columns(train_set, column_X, column_y)
-        X_val_txt, y_val = fnc.seperate_columns(val_set, column_X, column_y)
-        X_test_txt, y_test = fnc.seperate_columns(test_set, column_X, column_y)
+        
+        # separate labes from text
+        preprocess_bar.progress(40)
+        X_train_txt, y_train = fnc.separate_columns(train_set, column_X, column_y)
+        X_val_txt, y_val = fnc.separate_columns(val_set, column_X, column_y)
+        X_test_txt, y_test = fnc.separate_columns(test_set, column_X, column_y)
 
         # Tokenizer
+        preprocess_bar.progress(50)
         tokenizer = tf.keras.preprocessing.text.Tokenizer(num_words=vocab_size, char_level=False)
         tokenizer.fit_on_texts(X_train_txt)
 
         # Transform texts to int and pad to maxlen
+        preprocess_bar.progress(80)
         X_train_int, X_val_int, X_test_int = fnc.transform_texts(
             tokenizer, maxlen, X_train_txt, X_val_txt, X_test_txt
             )
@@ -183,6 +197,8 @@ if st.session_state.df is not None:
         'tokenizer': tokenizer,
         }
         st.session_state.update(data_dict)
+
+        preprocess_bar.progress(100)
 
     if st.session_state.X_train_int is not None:
         st.session_state.prep_completed = True
@@ -232,12 +248,13 @@ if st.session_state.model_built:
     Different combinations of optimizers, loss functions, and metrics can have a significant impact on the performance of the model, so it's important to **choose these hyperparameters carefully** and optimize them for the specific task at hand.
     """
     st.write(COMPILE_INFO)
-    
+
     optimizer = fnc.display_optimizer()
     loss_function = fnc.display_loss_function()
     
     # Compile the model
     if st.button('Compile Model'):
+        fnc.reset_session_states('compile')
         st.session_state.model.compile(
             loss=loss_function,
             optimizer=optimizer,
@@ -272,6 +289,8 @@ if st.session_state.model_compiled:
 
     # Train the model
     if st.button('Train Model'):
+        fnc.reset_session_states('train')
+        
         my_callbacks.append(callbacks.PrintCallback(num_epochs))
         my_callbacks.append(callbacks.ProgressCallback(num_steps))
         
@@ -302,36 +321,37 @@ if st.session_state.history:
     """
     st.write(EVALUATE_INFO)
     
-    if st.button('Evaluate Model'):
-        model = st.session_state.model
-        y_test = st.session_state.y_test
-        X_test = fnc.get_test_set()
-        
-        # Predict ŷ on test set and evaluate with y
-        pred_test = (model.predict(X_test) > 0.5).astype("int32")
-        accuracy, precision, recall, f1 = fnc.get_metrics(y_test, pred_test.flatten())
-        scores = {'Accuracy': accuracy, 'Precision': precision, 'Recall': recall, 'F1 Score': f1}
-        
-        # Create dataframe
-        scores_df = pd.DataFrame(scores, index=[0]).rename(index={0: 'Score'})
+    model = st.session_state.model
+    y_test = st.session_state.y_test
+    X_test = fnc.get_test_set()
 
-        # Create figures
-        fig_acc_loss = fnc.acc_loss_over_time()
-        cm = fnc.display_confusion_matrix(y_test, pred_test.flatten())
-        fig_cm = fnc.plot_confusion_matrix(cm)
-        fpr, tpr, thresholds = roc_curve(y_test, pred_test.flatten())
-        roc_auc = auc(fpr, tpr)
-        fig_roc = fnc.plot_roc_curve(fpr, tpr, roc_auc)
+    # get predictions on test set
+    pred_test = st.session_state.pred_test
+    if pred_test is None or (isinstance(pred_test, np.ndarray) and pred_test.size == 0):
+        pred_test = fnc.get_predictions(model, X_test)
 
-        # Update sessions
-        data_dict = {'fig_acc_loss': fig_acc_loss, 'scores_df': scores_df, 'fig_cm': fig_cm, 'fig_roc': fig_roc}
-        st.session_state.update(data_dict)
-        
-        # Display dataframe and figures
-        if st.session_state.fig_acc_loss:
-            fnc.display_figures()
-        
-        st.write("""***""")
+    # calculate performance metrics
+    accuracy, precision, recall, f1 = fnc.get_metrics(y_test, pred_test.flatten())
+    scores = {'Accuracy': accuracy, 'Precision': precision, 'Recall': recall, 'F1 Score': f1}
+    scores_df = pd.DataFrame(scores, index=[0]).rename(index={0: 'Score'})
+
+    # Create figures
+    fig_acc_loss = fnc.acc_loss_over_time()
+    cm = fnc.display_confusion_matrix(y_test, pred_test.flatten())
+    fig_cm = fnc.plot_confusion_matrix(cm)
+    fpr, tpr, thresholds = roc_curve(y_test, pred_test.flatten())
+    roc_auc = auc(fpr, tpr)
+    fig_roc = fnc.plot_roc_curve(fpr, tpr, roc_auc)
+
+    # Update sessions
+    data_dict = {'pred_test': pred_test, 'fig_acc_loss': fig_acc_loss, 'scores_df': scores_df, 'fig_cm': fig_cm, 'fig_roc': fig_roc}
+    st.session_state.update(data_dict)
+
+    # Display dataframe and figures
+    if st.session_state.fig_acc_loss:
+        fnc.display_figures()
+
+    st.write("""***""")
 
 
 ######################
