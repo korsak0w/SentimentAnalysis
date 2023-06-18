@@ -56,7 +56,7 @@ def display_upload_settings():
     with separator_expander:
         a1, a2 = st.columns(2)
         with a1:
-            col_sep = a1.selectbox("Column sep.", [',', ';', '|', '\\s+', '\\t', 'other'], key='col_sep')
+            col_sep = a1.selectbox("Column Separation", [',', ';', '|', '\\s+', '\\t', 'other'], key='col_sep')
             if col_sep == 'other':
                 col_sep = st.text_input('Specify your column separator', key='col_sep_custom')
         with a2:
@@ -91,25 +91,26 @@ def display_df_checkboxes(df):
     TXT_DATA_INFO = "Pandas DataFrame Info"
 
     col1, col2 = st.columns(2)
-    if col1.checkbox(TXT_DATA_INFO, value = False, key = st.session_state['key']):
+    if col1.checkbox(TXT_DATA_INFO, value = False, key=f"{st.session_state['key']}_info"):
         st.text(create_pd_info(df))
-    if col2.checkbox(TXT_RAW_DATA, value=False, key=st.session_state['key']):
+    if col2.checkbox(TXT_RAW_DATA, value=False, key=f"{st.session_state['key']}_data"):
         st.dataframe(df)
 
-def display_labels(df, column_y):
-    labels = df[column_y].unique()
-    col1, col2 = st.columns(2)
-    pos_label = col1.selectbox('Positive Label', labels, index=0)
-    neg_label = col2.selectbox('Negative Label', labels, index=1)
-    return pos_label, neg_label
+# ! remove ?
+#def display_labels(df, column_y):
+#    labels = df[column_y].unique()
+#    col1, col2 = st.columns(2)
+#    pos_label = col1.selectbox('Positive Label', labels, index=0)
+#    neg_label = col2.selectbox('Negative Label', labels, index=1)
+#    return pos_label, neg_label
 
 def display_preprocess_options(df):
     COLUMNS_WARNING = "Please ensure that you select only one column for the input text and one column for the labels. Using multiple columns for either the input text or the labels may result in errors or unexpected behavior in your analysis or model."
     columns = list(df.columns.values)
 
     col1, col2 = st.columns(2)
-    column_X = col1.selectbox('Select Input Column', columns, index=0)
-    column_y = col2.selectbox('Select Label Column', columns, index=1)
+    column_X = col1.selectbox('Input Column', columns, index=0)
+    column_y = col2.selectbox('Label Column', columns, index=1)
     if column_X==column_y: st.error(COLUMNS_WARNING)
 
     labels = df[column_y].unique()
@@ -779,23 +780,21 @@ def create_early_stopping():
     with st.expander('EarlyStopping Options'):
         col1, col2 = st.columns(2)
         monitor = col1.selectbox('Monitor', ("loss", "val_loss"), index=1, key='es_monitor')
-        min_delta = col2.number_input('Min Delta', min_value=0.00)
+        min_delta = col2.number_input('Min Delta', min_value=0.000, format="%.3f")
 
         col3, col4 = st.columns(2)
         patience = col3.number_input('Patience', min_value=0, key='es_patience')
         mode = col4.selectbox('Mode', ("auto", "min", "max"), key='es_mode')
 
-        col5, col6 = st.columns(2)
-        baseline = col5.number_input('Baseline', min_value=0.0)
-        restore_best_weights = col6.selectbox('Restore Best Weights', (False, True))
-        
+        restore_best_weights = st.selectbox('Restore Best Weights', (False, True))
+    
     return {
         'monitor': monitor,
         'min_delta': min_delta,
         'patience': patience,
         'verbose': 0,
         'mode': mode,
-        'baseline': baseline,
+        'baseline': None,
         'restore_best_weights': restore_best_weights,
     }
 
@@ -851,7 +850,7 @@ def get_predictions(model, X_test):
         progress = (i + len(batch)) / len(X_test)
         progress_bar.progress(progress)
     
-    # Flatten predictions into a single array
+    # flatten predictions into a single array
     return np.concatenate(predictions)
 
 
